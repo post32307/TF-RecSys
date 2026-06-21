@@ -1,0 +1,16 @@
+
+Final Test Results Summary - Sun Jun 21 10:45:01 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+GF-CF      | amazon-CD            | default                        | Recall@20: 0.05375186, NDCG@20: 0.02596935
+BSPM       | amazon-CD            | default                        | Recall@20: 0.04644024, NDCG@20: 0.02290761
+TurboCF    | amazon-CD            | default                        | Recall@20: 0.0486, NDCG@20: 0.0233
+EASE       | amazon-CD            | default                        | Recall@20: 0.0884, NDCG@20: 0.0494
+SGFCF      | amazon-CD            | default                        | ERROR
+
+Final Test Results Summary - Sun Jun 21 11:23:53 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+SGFCF      | amazon-CD            | default                        | Recall@20: 0.0453, NDCG@20: 0.0206
