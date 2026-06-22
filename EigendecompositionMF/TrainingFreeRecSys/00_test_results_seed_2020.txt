@@ -1,0 +1,21 @@
+
+Final Test Results Summary - Mon Jun 22 10:27:43 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+BSPM       | lastfm               | default                        | ERROR
+EASE       | lastfm               | default                        | ERROR
+GF-CF      | lastfm               | default                        | ERROR
+TurboCF    | lastfm               | default                        | ERROR
+FaGSP      | lastfm               | default                        | ERROR
+HiGSP      | lastfm               | default                        | ERROR
+SGFCF      | lastfm               | default                        | ERROR
+
+Final Test Results Summary - Mon Jun 22 10:32:19 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+BSPM       | lastfm               | default                        | Recall@20: 0.2560605, NDCG@20: 0.20586817
+EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
+GF-CF      | lastfm               | default                        | Recall@20: 0.27160043, NDCG@20: 0.21389639
+TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
