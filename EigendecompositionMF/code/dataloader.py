@@ -178,7 +178,8 @@ class Loader(BasicDataset):
                     trainUniqueUsers.append(uid)
                     trainUser.extend([uid] * len(items))
                     trainItem.extend(items)
-                    self.m_item = max(self.m_item, max(items))
+                    if len(items) > 0:
+                        self.m_item = max(self.m_item, max(items))
                     self.n_user = max(self.n_user, uid)
                     self.traindataSize += len(items)
         self.trainUniqueUsers = np.array(trainUniqueUsers)

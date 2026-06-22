@@ -42,7 +42,7 @@ class PSEmodel:
     # Dataset Operation Functions
 
     def getNormAdj(self,A,D_inv,alpha1=0.2,alpha2=0.4):
-        adj_norm = D_inv.power(alpha1) @ A @ D_inv.power(alpha1)
+        adj_norm = D_inv.power(alpha1) @ A @ D_inv.power(alpha2)
         return adj_norm
 
 
@@ -86,9 +86,9 @@ class PSEmodel:
                 'precision':np.array(pre), 
                 'ndcg':np.array(ndcg)}
 
-    def Test(self,X, dataset, multicore=0):
+    def Test(self, X, dataset, users=None, items=None, multicore=0):
         if X.shape == (self.num_users, self.num_items):
-            return self.Test_RatingMatrix(X, dataset, multicore)
+            return self.Test_RatingMatrix(X, dataset, users, items, multicore)
         u_batch_size = world.config['test_u_batch_size']
         testDict: dict = dataset.testDict
         max_K = max(world.topks)
@@ -99,7 +99,23 @@ class PSEmodel:
         if multicore == 1:
             pool = multiprocessing.Pool(world.CORES)
         with torch.no_grad():
-            users = list(testDict.keys())
+            if users is None:
+                users = list(testDict.keys())
+                
+            if items is not None:
+                items_set = set(items)
+                valid_users = []
+                for u in users:
+                    if len(items_set.intersection(testDict[u])) > 0:
+                        valid_users.append(u)
+                users = valid_users
+                
+            if len(users) == 0:
+                if multicore == 1:
+                    pool.close()
+                return results
+                
+            u_batch_size = min(u_batch_size, max(1, len(users) // 10))
             try:
                 assert u_batch_size <= len(users) / 10
             except AssertionError:
@@ -110,16 +126,21 @@ class PSEmodel:
             total_batch = (len(users) + u_batch_size - 1) // u_batch_size if len(users) > 0 else 0
             for batch_users in helpers.minibatch(users, batch_size=u_batch_size):
                 allPos = dataset.getUserPosItems(batch_users)
-                groundTrue = [testDict[u] for u in batch_users]
+                if items is not None:
+                    groundTrue = [list(items_set.intersection(testDict[u])) for u in batch_users]
+                else:
+                    groundTrue = [testDict[u] for u in batch_users]
                 batch_users_gpu = torch.Tensor(batch_users).long()
                 batch_users_gpu = batch_users_gpu.to(world.device)
                 rating = self.getUsersRating(X,batch_users_gpu)
                 exclude_index = []
                 exclude_items = []
-                for range_i, items in enumerate(allPos):
-                    exclude_index.extend([range_i] * len(items))
-                    exclude_items.extend(items)
+                for range_i, items_pos in enumerate(allPos):
+                    exclude_index.extend([range_i] * len(items_pos))
+                    exclude_items.extend(items_pos)
                 rating[exclude_index, exclude_items] = -(1<<10)
+                
+                
                 _, rating_K = torch.topk(rating, k=max_K)
                 rating = rating.cpu().numpy()
                 del rating
@@ -127,12 +148,12 @@ class PSEmodel:
                 rating_list.append(rating_K.cpu())
                 groundTrue_list.append(groundTrue)
             assert total_batch == len(users_list)
-            X = zip(rating_list, groundTrue_list)
+            X_zip = zip(rating_list, groundTrue_list)
             if multicore == 1:
-                pre_results = pool.map(self.test_one_batch, X)
+                pre_results = pool.map(self.test_one_batch, X_zip)
             else:
                 pre_results = []
-                for x in X:
+                for x in X_zip:
                     pre_results.append(self.test_one_batch(x))
             scale = float(u_batch_size/len(users))
             for result in pre_results:
@@ -149,7 +170,7 @@ class PSEmodel:
     
 
 
-    def Test_RatingMatrix(self, X, dataset, multicore=0):
+    def Test_RatingMatrix(self, X, dataset, users=None, items=None, multicore=0):
         u_batch_size = world.config['test_u_batch_size']
         testDict: dict = dataset.testDict
         max_K = max(world.topks)
@@ -159,7 +180,23 @@ class PSEmodel:
         if multicore == 1:
             pool = multiprocessing.Pool(world.CORES)
         with torch.no_grad():
-            users = list(testDict.keys())
+            if users is None:
+                users = list(testDict.keys())
+                
+            if items is not None:
+                items_set = set(items)
+                valid_users = []
+                for u in users:
+                    if len(items_set.intersection(testDict[u])) > 0:
+                        valid_users.append(u)
+                users = valid_users
+                
+            if len(users) == 0:
+                if multicore == 1:
+                    pool.close()
+                return results
+
+            u_batch_size = min(u_batch_size, max(1, len(users) // 10))
             try:
                 assert u_batch_size <= len(users) / 10
             except AssertionError:
@@ -170,16 +207,21 @@ class PSEmodel:
             total_batch = (len(users) + u_batch_size - 1) // u_batch_size if len(users) > 0 else 0
             for batch_users in helpers.minibatch(users, batch_size=u_batch_size):
                 allPos = dataset.getUserPosItems(batch_users)
-                groundTrue = [testDict[u] for u in batch_users]
+                if items is not None:
+                    groundTrue = [list(items_set.intersection(testDict[u])) for u in batch_users]
+                else:
+                    groundTrue = [testDict[u] for u in batch_users]
                 batch_users_gpu = torch.Tensor(batch_users).long()
                 batch_users_gpu = batch_users_gpu.to(world.device)
                 rating = X[batch_users_gpu]
                 exclude_index = []
                 exclude_items = []
-                for range_i, items in enumerate(allPos):
-                    exclude_index.extend([range_i] * len(items))
-                    exclude_items.extend(items)
+                for range_i, items_pos in enumerate(allPos):
+                    exclude_index.extend([range_i] * len(items_pos))
+                    exclude_items.extend(items_pos)
                 rating[exclude_index, exclude_items] = -(1<<10)
+                
+                
                 _, rating_K = torch.topk(rating, k=max_K)
                 rating = rating.cpu().numpy()
                 del rating
