@@ -256,6 +256,7 @@ def main():
     parser.add_argument("--seeds", nargs="+", type=int, default=[2020], help="List of seeds to run.")
     parser.add_argument("--search", action="store_true", help="Perform parameter search using a validation split, then test.")
     parser.add_argument("--test_from_results", action="store_true", help="Parse the results text file to find the best validation parameters and run the final test")
+    parser.add_argument("--max_combinations", type=int, default=None, help="Limit parameter combinations per model for smoke tests.")
     
     args = parser.parse_args()
     
@@ -422,6 +423,8 @@ def main():
                             keys = list(grid.keys())
                             values = list(grid.values())
                             combinations = list(itertools.product(*values))
+                            if args.max_combinations is not None:
+                                combinations = combinations[:args.max_combinations]
                         
                             best_recall = -1.0
                             best_params = None
@@ -438,7 +441,8 @@ def main():
                                 with open(results_file, 'a') as f:
                                     f.write(result_line + "\n")
                                 best_recall = get_recall_value(metrics_str)
-                                best_params = first_params
+                                if best_recall >= 0:
+                                    best_params = first_params
                             
                                 # 2. Run the rest of the combinations in parallel across the GPUs
                                 remaining_combos = combinations[1:]

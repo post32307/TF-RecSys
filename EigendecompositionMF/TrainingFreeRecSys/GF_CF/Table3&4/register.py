@@ -2,12 +2,15 @@ import world
 import dataloader
 import model
 import utils
+from pathlib import Path
 from pprint import pprint
 
+DATA_ROOT = Path(__file__).resolve().parents[3] / "data"
+
 if world.dataset in ['gowalla', 'yelp2018', 'amazon-book', 'dummy_small', 'dummy_large', 'amazon-CD','amazon-electronics','citeulike','movielens', 'news', 'douban-book','epinions','yelp']:
-    dataset = dataloader.Loader(path="/home/hakbeom/MainCodes/TF-RecSys/EigendecompositionMF/data/"+world.dataset)
+    dataset = dataloader.Loader(path=str(DATA_ROOT / world.dataset))
 elif world.dataset == 'lastfm':
-    dataset = dataloader.LastFM(path="/home/hakbeom/MainCodes/TF-RecSys/EigendecompositionMF/data/lastfm")
+    dataset = dataloader.LastFM(path=str(DATA_ROOT / "lastfm"))
 
 print('===========config================')
 pprint(world.config)

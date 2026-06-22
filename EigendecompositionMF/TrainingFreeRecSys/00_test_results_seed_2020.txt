@@ -19,3 +19,47 @@ BSPM       | lastfm               | default                        | Recall@20: 
 EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
 GF-CF      | lastfm               | default                        | Recall@20: 0.27160043, NDCG@20: 0.21389639
 TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
+
+Final Test Results Summary - Mon Jun 22 10:35:05 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+BSPM       | lastfm               | default                        | ERROR
+
+Final Test Results Summary - Mon Jun 22 10:35:15 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+BSPM       | lastfm               | default                        | ERROR
+EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
+GF-CF      | lastfm               | default                        | ERROR
+TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
+FaGSP      | lastfm               | default                        | Recall@20: 0.2529, NDCG@20: 0.2056
+HiGSP      | lastfm               | default                        | Recall@20: 0.1773, NDCG@20: 0.1636
+SGFCF      | lastfm               | default                        | Recall@20: 0.2457, NDCG@20: 0.1814
+
+Final Test Results Summary - Mon Jun 22 10:52:59 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+BSPM       | lastfm               | default                        | ERROR
+EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
+GF-CF      | lastfm               | default                        | ERROR
+TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
+FaGSP      | lastfm               | default                        | Recall@20: 0.2529, NDCG@20: 0.2056
+HiGSP      | lastfm               | default                        | Recall@20: 0.1773, NDCG@20: 0.1636
+SGFCF      | lastfm               | default                        | Recall@20: 0.2457, NDCG@20: 0.1814
+BSPM       | amazon-electronics   | default                        | ERROR
+EASE       | amazon-electronics   | default                        | Recall@20: 0.1299, NDCG@20: 0.1000
+GF-CF      | amazon-electronics   | default                        | ERROR
+TurboCF    | amazon-electronics   | default                        | Recall@20: 0.1424, NDCG@20: 0.1079
+FaGSP      | amazon-electronics   | default                        | Recall@20: 0.0988, NDCG@20: 0.0794
+HiGSP      | amazon-electronics   | default                        | Recall@20: 0.0573, NDCG@20: 0.0574
+SGFCF      | amazon-electronics   | default                        | Recall@20: 0.1112, NDCG@20: 0.0835
+
+Final Test Results Summary - Mon Jun 22 11:00:55 2026 (Seed: 2020)
+================================================================================
+Model      | Dataset              | Parameters                     | Metrics
+--------------------------------------------------------------------------------
+GF-CF      | lastfm               | default                        | Recall@20: 0.27160043, NDCG@20: 0.21389639
+GF-CF      | amazon-electronics   | default                        | Recall@20: 0.10968247, NDCG@20: 0.08493159
