@@ -37,10 +37,11 @@ if __name__ == "__main__":
     if args.verbose:
         print(f"Device: {device}")
     dataset = args.dataset
+    data_root_override = os.environ.get("TFRECSYS_DATA_ROOT")
     path_tr = f"{current_directory}/dataset/{dataset}_train.npz"
     path_ts = f"{current_directory}/dataset/{dataset}_test.npz"
     
-    if os.path.exists(path_tr) and os.path.exists(path_ts):
+    if not data_root_override and os.path.exists(path_tr) and os.path.exists(path_ts):
         R_tr = csr2torch(sp.load_npz(path_tr)).to(device)
         R_ts = csr2torch(sp.load_npz(path_ts)).to(device)
     else:
@@ -70,7 +71,8 @@ if __name__ == "__main__":
                             if i_idx > mi: mi = i_idx
             return rows, cols, data, mu, mi
 
-        data_dir = os.path.abspath(os.path.join(current_directory, "..", "..", "data", dataset))
+        data_root = data_root_override or os.path.abspath(os.path.join(current_directory, "..", "..", "data"))
+        data_dir = os.path.abspath(os.path.join(data_root, dataset))
         train_file = "data1.txt" if dataset == "lastfm" else "train.txt"
         test_file = "test1.txt" if dataset == "lastfm" else "test.txt"
         

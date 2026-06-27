@@ -68,4 +68,3 @@ class Dataset:
             u, i = self.test_df['u'][ind_test], self.test_df['i'][ind_test]
             test_user_items_dict[u].append(i)
         return user_interacted_items_dict, valid_user_items_dict, test_user_items_dict
-

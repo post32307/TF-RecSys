@@ -51,14 +51,12 @@ class Dataset():
         self.test_df['i'] = self.test_df['i'].map(iid_mapping)
 
     def get_init_mats(self):
-        init_adj_mat = np.zeros((self.num_user, self.num_item))
-        init_rat_mat = np.zeros((self.num_user, self.num_item))
-        for ind in range(self.train_df.shape[0]):
-            u, i, r= self.train_df['u'][ind], self.train_df['i'][ind], self.train_df['r'][ind]
-            init_adj_mat[u][i] = 1.0
-            init_rat_mat[u][i] = 1.0
-        init_adj_mat = sp.csr_matrix(init_adj_mat)
-        init_rat_mat = sp.csr_matrix(init_rat_mat)
+        rows = self.train_df['u'].to_numpy(dtype=np.int64)
+        cols = self.train_df['i'].to_numpy(dtype=np.int64)
+        data = np.ones(len(rows), dtype=np.float32)
+        shape = (self.num_user, self.num_item)
+        init_adj_mat = sp.csr_matrix((data, (rows, cols)), shape=shape)
+        init_rat_mat = init_adj_mat.copy()
         return init_adj_mat, init_rat_mat
 
     def get_train_test_data(self):

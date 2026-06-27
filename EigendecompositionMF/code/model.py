@@ -29,6 +29,7 @@ class PSEmodel:
         self.D = sp.diags(rowsum) #CSR
         self.D_inv = sp.diags(1. / rowsum) #CSR
 
+
     # PSE Functions
 
     # 1.
@@ -58,6 +59,26 @@ class PSEmodel:
         Eigs = torch.tensor(Eigs, dtype=torch.float32).to(self.device)
         U = torch.nn.functional.normalize(U, p=2, dim=0)
         return U,Eigs
+    
+    def Eigendecomposition_Asym(self,X):
+        if torch.is_tensor(X):
+            X = X.cpu().numpy()
+        
+        Eigs_R,U_R = eigs(X, k=self.k,which='LR')
+        U_R = np.asarray(U_R.real, dtype=np.float32)
+        Eigs_R = np.asarray(Eigs_R.real, dtype=np.float32)
+        U_R = torch.from_numpy(U_R).to(self.device)
+        Eigs_R = torch.from_numpy(Eigs_R).to(self.device)
+        U_R = torch.nn.functional.normalize(U_R, p=2, dim=0)
+
+        _,U_L = eigs(X.T, k=self.k,which='LR')
+        U_L = np.asarray(U_L.real, dtype=np.float32)
+        U_L = torch.from_numpy(U_L).to(self.device)
+        U_L = torch.nn.functional.normalize(U_L, p=2, dim=0)
+
+        Eigs = Eigs_R
+        
+        return U_L,U_R,Eigs
     
 
     # Evaluation Functions
@@ -168,7 +189,6 @@ class PSEmodel:
                 pool.close()
             return results
     
-
 
     def Test_RatingMatrix(self, X, dataset, users=None, items=None, multicore=0):
         u_batch_size = world.config['test_u_batch_size']

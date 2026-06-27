@@ -2,16 +2,27 @@ import world
 import numpy as np
 from dataloader import BasicDataset
 from time import time
+import glob
+import importlib.util
+import os
+import sysconfig
 
 try:
-    from cppimport import imp_from_filepath
-    from os.path import join, dirname
-    path = join(dirname(__file__), "sources/sampling.cpp")
-    sampling = imp_from_filepath(path)
+    sources_path = os.path.join(os.path.dirname(__file__), "sources")
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    ext_candidates = glob.glob(os.path.join(sources_path, f"sampling*{ext_suffix}"))
+    if ext_candidates:
+        spec = importlib.util.spec_from_file_location("sampling", ext_candidates[0])
+        sampling = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sampling)
+    else:
+        from cppimport import imp_from_filepath
+        path = os.path.join(sources_path, "sampling.cpp")
+        sampling = imp_from_filepath(path)
     sampling.seed(world.seed)
     sample_ext = True
-except:
-    world.cprint("Cpp extension not loaded")
+except BaseException as e:
+    world.cprint(f"Cpp extension not loaded: {e}")
     sample_ext = False
 
 

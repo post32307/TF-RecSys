@@ -1,65 +1,29 @@
+Final Test Results Summary (Seed: 2020)
+Run started:
+Sat Jun 27 05:50:38 2026 : BSPM / amazon-electronics
+Sat Jun 27 05:54:04 2026 : BSPM / amazon-electronics
+Sat Jun 27 16:02:23 2026 : BSPM / epinions
+Sat Jun 27 16:45:30 2026 : BSPM / epinions
+========================================================================================================================
+Model      | Dataset              | Metrics                                                      | Time     | Parameters
+------------------------------------------------------------------------------------------------------------------------
+BSPM       | amazon-electronics   | (Test) Recall@20: 0.136609, NDCG@20: 0.103536                | 00:05    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=32
+EASE       | amazon-electronics   | (Test) Recall@20: 0.1299, NDCG@20: 0.1                       | 00:01    | lambda_=500
+GF-CF      | amazon-electronics   | (Test) Recall@20: 0.143122, NDCG@20: 0.108702                | 00:05    | k=32
+PGSP       | amazon-electronics   | (Test) Recall@20: 0.1387, NDCG@20: 0.1035                    | 00:02    | k=32, phi=0.5
+TurboCF    | amazon-electronics   | (Test) Recall@20: 0.1318, NDCG@20: 0.0986                    | 00:05    | alpha=0.7, power=1.0, filter=3
+SGFCF      | amazon-electronics   | (Test) Recall@20: 0.1439, NDCG@20: 0.1123                    | 00:03    | k=32, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
 
-Final Test Results Summary - Mon Jun 22 10:27:43 2026 (Seed: 2020)
-================================================================================
-Model      | Dataset              | Parameters                     | Metrics
---------------------------------------------------------------------------------
-BSPM       | lastfm               | default                        | ERROR
-EASE       | lastfm               | default                        | ERROR
-GF-CF      | lastfm               | default                        | ERROR
-TurboCF    | lastfm               | default                        | ERROR
-FaGSP      | lastfm               | default                        | ERROR
-HiGSP      | lastfm               | default                        | ERROR
-SGFCF      | lastfm               | default                        | ERROR
+BSPM       | citeulike            | (Test) Recall@20: 0.0222053, NDCG@20: 0.0629641              | 00:23    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=256
+EASE       | citeulike            | (Test) Recall@20: 0.0238, NDCG@20: 0.0779                    | 00:27    | lambda_=100
+GF-CF      | citeulike            | (Test) Recall@20: 0.0218107, NDCG@20: 0.0623181              | 00:17    | k=256
+PGSP       | citeulike            | (Test) Recall@20: 0.0267, NDCG@20: 0.0746                    | 00:02    | k=32, phi=0.25
+TurboCF    | citeulike            | (Test) Recall@20: 0.0225, NDCG@20: 0.0679                    | 00:07    | alpha=0.7, power=0.5, filter=3
+SGFCF      | citeulike            | (Test) Recall@20: 0.0775, NDCG@20: 0.0859                    | 00:05    | k=64, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
 
-Final Test Results Summary - Mon Jun 22 10:32:19 2026 (Seed: 2020)
-================================================================================
-Model      | Dataset              | Parameters                     | Metrics
---------------------------------------------------------------------------------
-BSPM       | lastfm               | default                        | Recall@20: 0.2560605, NDCG@20: 0.20586817
-EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
-GF-CF      | lastfm               | default                        | Recall@20: 0.27160043, NDCG@20: 0.21389639
-TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
-
-Final Test Results Summary - Mon Jun 22 10:35:05 2026 (Seed: 2020)
-================================================================================
-Model      | Dataset              | Parameters                     | Metrics
---------------------------------------------------------------------------------
-BSPM       | lastfm               | default                        | ERROR
-
-Final Test Results Summary - Mon Jun 22 10:35:15 2026 (Seed: 2020)
-================================================================================
-Model      | Dataset              | Parameters                     | Metrics
---------------------------------------------------------------------------------
-BSPM       | lastfm               | default                        | ERROR
-EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
-GF-CF      | lastfm               | default                        | ERROR
-TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
-FaGSP      | lastfm               | default                        | Recall@20: 0.2529, NDCG@20: 0.2056
-HiGSP      | lastfm               | default                        | Recall@20: 0.1773, NDCG@20: 0.1636
-SGFCF      | lastfm               | default                        | Recall@20: 0.2457, NDCG@20: 0.1814
-
-Final Test Results Summary - Mon Jun 22 10:52:59 2026 (Seed: 2020)
-================================================================================
-Model      | Dataset              | Parameters                     | Metrics
---------------------------------------------------------------------------------
-BSPM       | lastfm               | default                        | ERROR
-EASE       | lastfm               | default                        | Recall@20: 0.2433, NDCG@20: 0.1913
-GF-CF      | lastfm               | default                        | ERROR
-TurboCF    | lastfm               | default                        | Recall@20: 0.2714, NDCG@20: 0.2071
-FaGSP      | lastfm               | default                        | Recall@20: 0.2529, NDCG@20: 0.2056
-HiGSP      | lastfm               | default                        | Recall@20: 0.1773, NDCG@20: 0.1636
-SGFCF      | lastfm               | default                        | Recall@20: 0.2457, NDCG@20: 0.1814
-BSPM       | amazon-electronics   | default                        | ERROR
-EASE       | amazon-electronics   | default                        | Recall@20: 0.1299, NDCG@20: 0.1000
-GF-CF      | amazon-electronics   | default                        | ERROR
-TurboCF    | amazon-electronics   | default                        | Recall@20: 0.1424, NDCG@20: 0.1079
-FaGSP      | amazon-electronics   | default                        | Recall@20: 0.0988, NDCG@20: 0.0794
-HiGSP      | amazon-electronics   | default                        | Recall@20: 0.0573, NDCG@20: 0.0574
-SGFCF      | amazon-electronics   | default                        | Recall@20: 0.1112, NDCG@20: 0.0835
-
-Final Test Results Summary - Mon Jun 22 11:00:55 2026 (Seed: 2020)
-================================================================================
-Model      | Dataset              | Parameters                     | Metrics
---------------------------------------------------------------------------------
-GF-CF      | lastfm               | default                        | Recall@20: 0.27160043, NDCG@20: 0.21389639
-GF-CF      | amazon-electronics   | default                        | Recall@20: 0.10968247, NDCG@20: 0.08493159
+BSPM       | lastfm               | (Test) Recall@20: 0.271606, NDCG@20: 0.210276                | 00:06    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=128
+EASE       | lastfm               | (Test) Recall@20: 0.2569, NDCG@20: 0.2024                    | 00:02    | lambda_=200
+GF-CF      | lastfm               | (Test) Recall@20: 0.275317, NDCG@20: 0.213821                | 00:05    | k=128
+PGSP       | lastfm               | (Test) Recall@20: 0.275, NDCG@20: 0.1288                     | 00:02    | k=128, phi=0.75
+TurboCF    | lastfm               | (Test) Recall@20: 0.2714, NDCG@20: 0.2114                    | 00:03    | alpha=0.5, power=0.5, filter=1
+SGFCF      | lastfm               | (Test) Recall@20: 0.2765, NDCG@20: 0.2178                    | 00:04    | k=64, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5

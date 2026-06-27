@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import time
 import gc
+import os
 
 
 parser = argparse.ArgumentParser(description='Argument parser for the algorithm.')
@@ -18,9 +19,16 @@ parser.add_argument('--alpha', type=float, default=0.0, help='param for G^2N')
 parser.add_argument('--eps', type=float, default=0.5, help='param for G^2N')
 parser.add_argument('--gamma', type=float, default=1.0, help='weight for non-low frequency')
 parser.add_argument('--seed', type=int, default=2020)
+parser.add_argument('--svd_backend', type=str, default=os.environ.get('SGFCF_SVD_BACKEND', 'cuda'), choices=['cpu', 'cuda', 'auto'], help='SVD backend: cpu=scipy svds, cuda=torch GPU SVD, auto=cuda when available.')
+parser.add_argument('--cuda_exact_max_cells', type=int, default=int(os.environ.get('SGFCF_CUDA_EXACT_MAX_CELLS', '60000000')), help='Use exact dense CUDA SVD up to this many user-item cells; larger matrices use CUDA low-rank SVD.')
+parser.add_argument('--cuda_svd_niter', type=int, default=int(os.environ.get('SGFCF_CUDA_SVD_NITER', '30')), help='Power iterations for CUDA low-rank SVD on large sparse matrices.')
 
 args = parser.parse_args()
  
+torch.manual_seed(args.seed)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(args.seed)
+
 dataset = args.dataset
 setting = args.density
 k = args.k
@@ -29,9 +37,8 @@ beta_2 = args.beta_2
 alpha = args.alpha
 eps = args.eps
 gamma=args.gamma
+svd_backend = args.svd_backend
 
-
-import os
 
 def load_txt(filename):
     rows, cols = [], []
@@ -56,7 +63,11 @@ def load_txt(filename):
                     if i_idx > mi: mi = i_idx
     return pd.DataFrame({'user': rows, 'item': cols}), mu, mi
 
-data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", dataset))
+data_root = os.environ.get(
+    "TFRECSYS_DATA_ROOT",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data")),
+)
+data_dir = os.path.abspath(os.path.join(data_root, dataset))
 train_file = "data1.txt" if dataset == "lastfm" else "train.txt"
 test_file = "test1.txt" if dataset == "lastfm" else "test.txt"
 
@@ -110,31 +121,62 @@ for row in df_train.itertuples():
     train_data[row[1]].append(row[2])
     train_data_item[row[2]].append(row[1])
 
-print("Computing homo ratios...")
+print("Computing homo ratios...", flush=True)
 ItemCo = freq_matrix_csr.T.dot(freq_matrix_csr)
 UserCo = freq_matrix_csr.dot(freq_matrix_csr.T)
 
+def threshold_offdiag_graph(mat):
+    graph = mat.tocsr(copy=True)
+    graph.setdiag(0)
+    graph.eliminate_zeros()
+    graph.data[graph.data <= 1] = 0
+    graph.eliminate_zeros()
+    graph.data = np.ones(graph.nnz, dtype=np.int8)
+    return graph
+
+def count_induced_edges(graph, nodes, marker, stamp):
+    size = len(nodes)
+    if size <= 1:
+        return 0, stamp
+    stamp += 1
+    if stamp == np.iinfo(marker.dtype).max:
+        marker.fill(0)
+        stamp = 1
+    marker[nodes] = stamp
+    count = 0
+    indptr = graph.indptr
+    indices = graph.indices
+    for node in nodes:
+        neighbors = indices[indptr[node]:indptr[node + 1]]
+        count += np.count_nonzero(marker[neighbors] == stamp)
+    return count, stamp
+
+ItemGraph = threshold_offdiag_graph(ItemCo)
+UserGraph = threshold_offdiag_graph(UserCo)
+del ItemCo, UserCo
+
 homo_ratio_user = np.zeros(user)
+item_marker = np.zeros(item, dtype=np.int32)
+item_stamp = 0
 for u in range(user):
     items_u = train_data[u]
     size = len(items_u)
     if size > 1:
-        sub_mat = ItemCo[items_u, :][:, items_u].toarray()
-        sub_mat -= 1
-        np.fill_diagonal(sub_mat, 0)
-        ratio = np.count_nonzero(sub_mat) / (size * (size - 1))
+        edge_count, item_stamp = count_induced_edges(ItemGraph, items_u, item_marker, item_stamp)
+        ratio = edge_count / (size * (size - 1))
         homo_ratio_user[u] = ratio
 
 homo_ratio_item = np.zeros(item)
+user_marker = np.zeros(user, dtype=np.int32)
+user_stamp = 0
 for i in range(item):
     users_i = train_data_item[i]
     size = len(users_i)
     if size > 1:
-        sub_mat = UserCo[users_i, :][:, users_i].toarray()
-        sub_mat -= 1
-        np.fill_diagonal(sub_mat, 0)
-        ratio = np.count_nonzero(sub_mat) / (size * (size - 1))
+        edge_count, user_stamp = count_induced_edges(UserGraph, users_i, user_marker, user_stamp)
+        ratio = edge_count / (size * (size - 1))
         homo_ratio_item[i] = ratio
+del ItemGraph, UserGraph
 
 homo_ratio_user = torch.FloatTensor(homo_ratio_user).cuda()
 homo_ratio_item = torch.FloatTensor(homo_ratio_item).cuda()
@@ -147,15 +189,54 @@ D_i = np.array(freq_matrix_csr.sum(axis=0)).flatten()
 D_i = 1.0 / np.power(D_i + alpha, eps)
 D_i[np.isinf(D_i)] = 0
 
-print("Computing SVD...")
+print("Computing SVD...", flush=True)
 norm_freq_matrix = sp.diags(D_u).dot(freq_matrix_csr).dot(sp.diags(D_i))
 
 from scipy.sparse.linalg import svds
-try:
-    u_mat, s_mat, vt_mat = svds(norm_freq_matrix, k=min(k+200, min(user, item)-1))
-except Exception:
-    from sklearn.utils.extmath import randomized_svd
-    u_mat, s_mat, vt_mat = randomized_svd(norm_freq_matrix, n_components=min(k+200, min(user, item)-1), random_state=42)
+
+def csr_to_cuda_sparse(matrix):
+    coo = matrix.tocoo()
+    indices = torch.as_tensor(np.vstack((coo.row, coo.col)), dtype=torch.long, device='cuda')
+    values = torch.as_tensor(coo.data, dtype=torch.float32, device='cuda')
+    return torch.sparse_coo_tensor(indices, values, coo.shape, device='cuda').coalesce()
+
+def compute_cpu_svd(matrix, rank):
+    try:
+        return svds(matrix, k=rank)
+    except Exception:
+        from sklearn.utils.extmath import randomized_svd
+        return randomized_svd(matrix, n_components=rank, random_state=42)
+
+def compute_cuda_svd(matrix, rank):
+    if not torch.cuda.is_available():
+        raise RuntimeError('CUDA SVD requested but CUDA is not available')
+    cells = matrix.shape[0] * matrix.shape[1]
+    if cells <= args.cuda_exact_max_cells:
+        print(f'Computing exact dense CUDA SVD, cells={cells}, rank={rank}...', flush=True)
+        dense = torch.as_tensor(matrix.toarray(), dtype=torch.float64, device='cuda')
+        u, s, vh = torch.linalg.svd(dense, full_matrices=False)
+        return (
+            u[:, :rank].cpu().numpy(),
+            s[:rank].cpu().numpy(),
+            vh[:rank, :].cpu().numpy(),
+        )
+
+    print(f'Computing sparse CUDA low-rank SVD, cells={cells}, rank={rank}, niter={args.cuda_svd_niter}...', flush=True)
+    sparse = csr_to_cuda_sparse(matrix)
+    u, s, v = torch.svd_lowrank(sparse, q=rank, niter=args.cuda_svd_niter)
+    return u.cpu().numpy(), s.cpu().numpy(), v.t().cpu().numpy()
+
+def compute_svd(matrix, rank):
+    backend = svd_backend
+    if backend == 'auto':
+        backend = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f'SGFCF SVD backend: {backend}', flush=True)
+    if backend == 'cuda':
+        return compute_cuda_svd(matrix, rank)
+    return compute_cpu_svd(matrix, rank)
+
+svd_k = min(k+200, min(user, item)-1)
+u_mat, s_mat, vt_mat = compute_svd(norm_freq_matrix, svd_k)
 
 idx = np.argsort(s_mat)[::-1]
 s_mat = s_mat[idx]
@@ -186,9 +267,10 @@ def test():
     ndcg10, ndcg20, recall10, recall20 = 0.0, 0.0, 0.0, 0.0
     idcg_set = cal_idcg()
     valid_users = 0
-    batch_size = 500
+    batch_size = 256 if item >= 50000 else 500
+    test_sets = [set(items) for items in test_data]
     
-    print("Evaluating in batches...")
+    print("Evaluating in batches...", flush=True)
     for start_idx in range(0, user, batch_size):
         end_idx = min(start_idx + batch_size, user)
         batch_users = end_idx - start_idx
@@ -229,7 +311,7 @@ def test():
             dcg10, dcg20, hit10, hit20 = 0.0, 0.0, 0.0, 0.0
             for kk in range(20):
                 max_item = topn[kk]
-                if test_data[now_user].count(max_item) != 0:
+                if max_item in test_sets[now_user]:
                     if kk < 10:
                         dcg10 += 1 / np.log2(2 + kk)
                         hit10 += 1
