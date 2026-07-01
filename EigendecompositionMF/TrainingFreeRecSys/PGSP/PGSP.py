@@ -31,16 +31,14 @@ P0_NORM = not args.no_p0_norm
 P1_NORM = not args.no_p1_norm
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_ROOT = Path(os.environ.get("TFRECSYS_DATA_ROOT", BASE_DIR.parent.parent / "data"))
+DATA_ROOT = Path(os.environ.get("TFRECSYS_DATA_ROOT", BASE_DIR.parent.parent / "data" / f"00_dataset_seed_{args.seed}"))
 data_dir = DATA_ROOT / args.dataset
-train_file = data_dir / ("data1.txt" if args.dataset == "lastfm" else "train.txt")
-test_file = data_dir / ("test1.txt" if args.dataset == "lastfm" else "test.txt")
+train_file = data_dir / "train.txt"
+test_file = data_dir / os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")
 cache_root = Path(args.cache_dir) if args.cache_dir else BASE_DIR / "temp"
 
 
 def parse_items(parts, dataset):
-    if dataset == "lastfm":
-        return [int(parts[1])] if len(parts) > 1 else []
     return [int(i) for i in parts[1:]]
 
 

@@ -4,9 +4,7 @@ import torch
 torch.set_num_threads(4)
 import numpy as np
 import os
-import shutil
 import sys
-import tempfile
 from time import time
 import time
 from tensorboardX import SummaryWriter
@@ -66,25 +64,26 @@ try:
     # ---------------------------------------------------------
     # 1. Define Paths & Load Target Main Datasets
     # ---------------------------------------------------------
-    data_root = os.path.join(world.ROOT_PATH, "data")
+    data_root = os.environ.get(
+        "TFRECSYS_DATA_ROOT",
+        os.path.join(world.ROOT_PATH, "data", f"00_dataset_seed_{world.seed}"),
+    )
     dataset_name = world.dataset
     dataset_path = os.path.join(data_root, dataset_name)
-    search_root = os.path.join(data_root, "00_search_sets_seed_"+str(world.seed))
-    split_dir = os.path.join(search_root, dataset_name)
+    split_dir = dataset_path
 
     if not os.path.isdir(dataset_path):
         raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
     world.cprint(f"Loading Full Evaluation Dataset: {dataset_name}")
-    if dataset_name == "lastfm":
-        test_dataset = dataloader.LastFM(path=dataset_path)
-    else:
+    previous_eval_file = os.environ.get("TFRECSYS_EVAL_FILE")
+    os.environ["TFRECSYS_EVAL_FILE"] = "test.txt"
+    try:
         test_dataset = dataloader.Loader(path=dataset_path)
-
-    def link_or_copy(src, dst):
-        try:
-            os.symlink(src, dst)
-        except OSError:
-            shutil.copyfile(src, dst)
+    finally:
+        if previous_eval_file is None:
+            os.environ.pop("TFRECSYS_EVAL_FILE", None)
+        else:
+            os.environ["TFRECSYS_EVAL_FILE"] = previous_eval_file
 
     # ---------------------------------------------------------
     # DYNAMIC MULTI-SCALE RESOLUTION LAYOUT GENERATION
@@ -101,8 +100,8 @@ try:
         raise ValueError("b must be at least 1.")
     if val_true not in (0, 1, 2):
         raise ValueError("val_true must be 0, 1, or 2.")
-    if val_true == 1 and not os.path.isdir(split_dir):
-        raise FileNotFoundError(f"Validation split directory not found: {split_dir}")
+    if val_true == 1 and not os.path.isfile(os.path.join(split_dir, "val.txt")):
+        raise FileNotFoundError(f"Validation file not found: {os.path.join(split_dir, 'val.txt')}")
     print(f"n : {n} / b : {b} / val_true : {val_true}")
     
     default_tau = 0.6
@@ -215,31 +214,17 @@ try:
     else:
         validation_start_time = time.time()
         val_dataset = None
-        tmpdir_context = tempfile.TemporaryDirectory(prefix=f"pse-{dataset_name}-val-") if val_true == 1 else None
         if val_true == 1:
-            world.cprint(f"Instantiating Temporary Directory for Seed Search Dataset Split")
+            world.cprint(f"Using Validation File for Parameter Search: {dataset_name}")
             search_target_name = "Validation"
         else:
             world.cprint(f"Using Full Test Dataset for Parameter Search: {dataset_name}")
             search_target_name = "Test"
 
+        previous_eval_file = os.environ.get("TFRECSYS_EVAL_FILE")
         try:
-            tmpdir = tmpdir_context.__enter__() if tmpdir_context is not None else None
-            if dataset_name == "lastfm":
-                if val_true == 1:
-                    link_or_copy(os.path.join(split_dir, "train_val.txt"), os.path.join(tmpdir, "data1.txt"))
-                    link_or_copy(os.path.join(split_dir, "validation_val.txt"), os.path.join(tmpdir, "test1.txt"))
-                    link_or_copy(os.path.join(data_root, "lastfm", "trustnetwork.txt"), os.path.join(tmpdir, "trustnetwork.txt"))
-                    val_dataset = dataloader.LastFM(path=tmpdir)
-                else:
-                    val_dataset = dataloader.LastFM(path=dataset_path)
-            else:
-                if val_true == 1:
-                    link_or_copy(os.path.join(split_dir, "train_val.txt"), os.path.join(tmpdir, "train.txt"))
-                    link_or_copy(os.path.join(split_dir, "validation_val.txt"), os.path.join(tmpdir, "test.txt"))
-                    val_dataset = dataloader.Loader(path=tmpdir)
-                else:
-                    val_dataset = dataloader.Loader(path=dataset_path)
+            os.environ["TFRECSYS_EVAL_FILE"] = "val.txt" if val_true == 1 else "test.txt"
+            val_dataset = dataloader.Loader(path=dataset_path)
             val_eval_batches, val_user_count = prepare_eval_batches(val_dataset)
 
             val_model = model.PSEmodel(world.config, val_dataset)
@@ -352,8 +337,10 @@ try:
             print(f"Validation Metrics -> {best_val_results}")
             print("-" * 80)
         finally:
-            if tmpdir_context is not None:
-                tmpdir_context.__exit__(None, None, None)
+            if previous_eval_file is None:
+                os.environ.pop("TFRECSYS_EVAL_FILE", None)
+            else:
+                os.environ["TFRECSYS_EVAL_FILE"] = previous_eval_file
 
     if val_true != 0 and best_val_results is None:
         raise RuntimeError("Validation search did not find a valid configuration.")

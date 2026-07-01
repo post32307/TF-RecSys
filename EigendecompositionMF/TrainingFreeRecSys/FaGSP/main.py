@@ -26,6 +26,10 @@ def main():
 
     random.seed(args.seed)
     np.random.seed(args.seed)
+    os.environ.setdefault(
+        "TFRECSYS_DATA_ROOT",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", f"00_dataset_seed_{args.seed}")),
+    )
     dataloader = Dataset(args.dataset)
 
     init_adj_mat, init_rat_mat = dataloader.get_init_mats()

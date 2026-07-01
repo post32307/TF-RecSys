@@ -15,7 +15,6 @@ import time
 import argparse
 import re
 import itertools
-import shutil
 from pathlib import Path
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
@@ -34,16 +33,35 @@ BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 # Datasets directory (relative to repository root)
 current_dir = Path(__file__).resolve().parent
 DATA_ROOT = current_dir.parent / "data"
-SEARCH_DATA_ROOT_PREFIX = "00_run_sweep_validation_seed"
+OG_DATA_ROOT = DATA_ROOT / "og_dataset"
+COMBINED_DATA_ROOT = DATA_ROOT / "combined_dataset"
+SPLIT_DATA_ROOT_PREFIX = "00_dataset_seed"
 
-# Datasets list dynamically retrieved from the data folder
-if DATA_ROOT.exists() and DATA_ROOT.is_dir():
-    DATASETS = sorted([
-        d for d in os.listdir(DATA_ROOT)
-        if os.path.isdir(os.path.join(DATA_ROOT, d)) and not d.startswith('.') and not d.endswith('_val') and not d.startswith("00")
-    ])
-else:
-    DATASETS = []
+def discover_datasets():
+    if COMBINED_DATA_ROOT.exists():
+        names = [
+            path.name.removesuffix("_combined.txt")
+            for path in COMBINED_DATA_ROOT.glob("*_combined.txt")
+        ]
+        return sorted(names)
+    if OG_DATA_ROOT.exists():
+        return sorted([
+            path.name for path in OG_DATA_ROOT.iterdir()
+            if path.is_dir() and not path.name.startswith(".")
+        ])
+    if DATA_ROOT.exists() and DATA_ROOT.is_dir():
+        return sorted([
+            d for d in os.listdir(DATA_ROOT)
+            if os.path.isdir(os.path.join(DATA_ROOT, d))
+            and not d.startswith(".")
+            and not d.endswith("_val")
+            and not d.startswith("00")
+            and d not in {"combined_dataset", "og_dataset"}
+        ])
+    return []
+
+# Datasets list dynamically retrieved from the combined/original data folder.
+DATASETS = discover_datasets()
 
 print("All Datasets:", DATASETS)
 
@@ -543,47 +561,37 @@ def parse_params_string(param_str):
         params[key] = value
     return params
 
-def dataset_file_names(dataset):
-    if dataset == "lastfm":
-        return "data1.txt", "test1.txt"
-    return "train.txt", "test.txt"
+def seed_data_root(seed):
+    return DATA_ROOT / f"{SPLIT_DATA_ROOT_PREFIX}_{seed}"
 
-def prepare_search_data_root(seed, dataset):
-    search_train = DATA_ROOT / f"00_search_sets_seed_{seed}" / dataset / "train_val.txt"
-    search_val = DATA_ROOT / f"00_search_sets_seed_{seed}" / dataset / "validation_val.txt"
-    if not search_train.exists() or not search_val.exists():
+def seed_dataset_dir(seed, dataset):
+    return seed_data_root(seed) / dataset
+
+def seed_dataset_exists(seed, dataset=None):
+    root = seed_data_root(seed)
+    if dataset is None:
+        return root.exists()
+    dataset_dir = root / dataset
+    return (
+        dataset_dir.exists()
+        and (dataset_dir / "train.txt").exists()
+        and (dataset_dir / "val.txt").exists()
+        and (dataset_dir / "test.txt").exists()
+    )
+
+def validation_env(seed, dataset):
+    if not seed_dataset_exists(seed, dataset):
         return None
+    return {
+        "TFRECSYS_DATA_ROOT": str(seed_data_root(seed)),
+        "TFRECSYS_EVAL_FILE": "val.txt",
+    }
 
-    search_root = DATA_ROOT / f"{SEARCH_DATA_ROOT_PREFIX}_{seed}"
-    dataset_dir = search_root / dataset
-    if dataset_dir.exists():
-        shutil.rmtree(dataset_dir)
-    dataset_dir.mkdir(parents=True, exist_ok=True)
-
-    train_filename, test_filename = dataset_file_names(dataset)
-    original_dir = DATA_ROOT / dataset
-    for original_file in original_dir.iterdir():
-        if not original_file.is_file():
-            continue
-        if original_file.name in {train_filename, test_filename}:
-            continue
-        if original_file.suffix == ".npz":
-            continue
-        shutil.copyfile(original_file, dataset_dir / original_file.name)
-
-    shutil.copyfile(search_train, dataset_dir / train_filename)
-    shutil.copyfile(search_val, dataset_dir / test_filename)
-    return search_root
-
-def cleanup_search_data_root(seed, dataset):
-    search_root = DATA_ROOT / f"{SEARCH_DATA_ROOT_PREFIX}_{seed}"
-    dataset_dir = search_root / dataset
-    if dataset_dir.exists():
-        shutil.rmtree(dataset_dir)
-    try:
-        search_root.rmdir()
-    except OSError:
-        pass
+def test_env(seed):
+    return {
+        "TFRECSYS_DATA_ROOT": str(seed_data_root(seed)),
+        "TFRECSYS_EVAL_FILE": "test.txt",
+    }
 
 def format_duration(seconds):
     seconds = max(0, int(seconds))
@@ -610,7 +618,21 @@ def is_valid_metrics(metrics_str):
     return get_recall_value(metrics_str) >= 0
 
 def get_dataset_size_bytes(dataset):
-    dataset_dir = DATA_ROOT / dataset
+    combined_file = COMBINED_DATA_ROOT / f"{dataset}_combined.txt"
+    if combined_file.exists():
+        try:
+            return os.path.getsize(combined_file)
+        except OSError:
+            pass
+
+    dataset_dir = OG_DATA_ROOT / dataset
+    if not dataset_dir.exists():
+        for split_root in sorted(DATA_ROOT.glob(f"{SPLIT_DATA_ROOT_PREFIX}_*")):
+            candidate = split_root / dataset
+            if candidate.exists():
+                dataset_dir = candidate
+                break
+
     total = 0
     if not dataset_dir.exists():
         return total
@@ -828,6 +850,7 @@ def verify_model_dataset(model_name, dataset, log_dir, gpu, seed, timeout, threa
     started_at = time.time()
     attempts = []
     last_detail = None
+    split_env = test_env(seed)
 
     for params in iter_param_dicts(model_name, dataset, combination_limit):
         detail = run_experiment(
@@ -840,6 +863,7 @@ def verify_model_dataset(model_name, dataset, log_dir, gpu, seed, timeout, threa
             timeout=timeout,
             threads_per_task=threads_per_task,
             return_details=True,
+            extra_env=split_env,
         )
         detail["params"] = params
         attempts.append(detail)
@@ -1211,18 +1235,17 @@ def main():
     args = parser.parse_args()
     args.gpus = normalize_gpus(args.gpus, args.gpu)
     
-    # Validation splits are only required for search mode. Verification/test runs
-    # use the original train/test files directly.
-    if args.search:
-        missing_seeds = []
-        for seed in args.seeds:
-            seed_dir = os.path.join(DATA_ROOT, f"00_search_sets_seed_{seed}")
-            if not os.path.exists(seed_dir):
-                missing_seeds.append(seed)
+    missing_seeds = []
+    for seed in args.seeds:
+        if not seed_dataset_exists(seed):
+            missing_seeds.append(seed)
 
-        if missing_seeds:
-            print(f"Error: The following seeds are not found in the data folder: {missing_seeds}")
-            sys.exit(1)
+    if missing_seeds:
+        print(
+            "Error: The following seed split folders are not found in the data "
+            f"folder: {missing_seeds}. Run data/split_dataset.py for each seed."
+        )
+        sys.exit(1)
         
     if args.models:
         models_to_run = args.models
@@ -1233,6 +1256,19 @@ def main():
         
     datasets_to_run = args.datasets if args.datasets else DATASETS
     datasets_to_run, dataset_sizes = get_sorted_datasets(datasets_to_run)
+
+    missing_dataset_splits = [
+        (seed, dataset)
+        for seed in args.seeds
+        for dataset in datasets_to_run
+        if not seed_dataset_exists(seed, dataset)
+    ]
+    if missing_dataset_splits:
+        print("Error: Missing train.txt/val.txt/test.txt for requested seed datasets:")
+        for seed, dataset in missing_dataset_splits:
+            print(f"  {SPLIT_DATA_ROOT_PREFIX}_{seed}/{dataset}")
+        print("Run data/split_dataset.py for the missing seed/dataset pairs.")
+        sys.exit(1)
     
     print(f"Starting experiments at {time.ctime()}")
     print(f"Search mode: {args.search}")
@@ -1251,6 +1287,7 @@ def main():
             results_file = os.path.join(BASE_DIR, f"00_val_results_seed_{seed}.txt")
             log_dir = os.path.join(BASE_DIR, f"00_exp_logs_seed_{seed}")
             test_results_file = os.path.join(BASE_DIR, f"00_test_results_seed_{seed}.txt")
+            final_eval_env = test_env(seed)
             if not os.path.exists(results_file):
                 print(f"No results file found for seed {seed}")
                 continue
@@ -1328,6 +1365,7 @@ def main():
                             model_name, dataset, log_dir, args.gpus[0], best_params, seed,
                             timeout=args.timeout_per_model,
                             return_details=True,
+                            extra_env=final_eval_env,
                         )
                         result_line = format_search_result_line(
                             model_name,
@@ -1358,6 +1396,7 @@ def main():
         log_dir = os.path.join(BASE_DIR, f"00_exp_logs_seed_{seed}")
         results_file = os.path.join(BASE_DIR, f"00_val_results_seed_{seed}.txt")
         test_results_file = os.path.join(BASE_DIR, f"00_test_results_seed_{seed}.txt")
+        final_eval_env = test_env(seed)
         os.makedirs(log_dir, exist_ok=True)
 
         started_at = time.time()
@@ -1418,19 +1457,23 @@ def main():
         try:
             for dataset in datasets_to_run:
                 current_search = args.search
-                search_data_root = None
                 search_env = None
                 best_params_dict = {}
 
                 try:
                     if current_search:
-                        search_data_root = prepare_search_data_root(seed, dataset)
-                        if search_data_root is None:
-                            print(f"Error: Search sets for {dataset} not found in 00_search_sets_seed_{seed}. Skipping search for this dataset.")
+                        search_env = validation_env(seed, dataset)
+                        if search_env is None:
+                            print(
+                                f"Error: train.txt/val.txt for {dataset} not found in "
+                                f"{SPLIT_DATA_ROOT_PREFIX}_{seed}. Skipping search for this dataset."
+                            )
                             current_search = False
                         else:
-                            print(f"  -> [SEARCH MODE] Using validation data root {search_data_root} for {dataset}")
-                            search_env = {"TFRECSYS_DATA_ROOT": str(search_data_root)}
+                            print(
+                                f"  -> [SEARCH MODE] Using {seed_dataset_dir(seed, dataset)} "
+                                f"with TFRECSYS_EVAL_FILE=val.txt"
+                            )
 
                     for model_name in models_to_run:
                         print(f"Model: {model_name} | Dataset: {dataset}")
@@ -1597,6 +1640,7 @@ def main():
                                 model_name, dataset, log_dir, args.gpu, None, seed,
                                 timeout=args.timeout_per_model,
                                 return_details=True,
+                                extra_env=final_eval_env,
                             )
                             metrics_str = detail["metrics"]
                             result_line = format_search_result_line(
@@ -1610,8 +1654,7 @@ def main():
                             append_result_line(test_results_file, result_line, dataset)
                             all_test_results[model_name][dataset] = get_recall_value(metrics_str)
                 finally:
-                    if search_data_root is not None:
-                        cleanup_search_data_root(seed, dataset)
+                    pass
 
                 if current_search:
                     print(f"=== [FINAL TEST MODE] Running models on {dataset} with best found parameters ===")
@@ -1627,6 +1670,7 @@ def main():
                                 model_name, dataset, log_dir, args.gpu, best_params, seed,
                                 timeout=args.timeout_per_model,
                                 return_details=True,
+                                extra_env=final_eval_env,
                             )
                             metrics_str = detail["metrics"]
                             result_line = format_search_result_line(

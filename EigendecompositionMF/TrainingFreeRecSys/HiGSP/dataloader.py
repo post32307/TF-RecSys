@@ -1,16 +1,18 @@
 import numpy as np
 import pandas as pd
+import os
 from collections import defaultdict
 
 
 class Dataset:
     def __init__(self, dataset):
         self.dataset=dataset
-        self.data_path = '../../data/{}'.format(dataset)
-        train_file = 'data1.txt' if dataset == 'lastfm' else 'train.txt'
-        test_file = 'test1.txt' if dataset == 'lastfm' else 'test.txt'
+        data_root = os.environ.get("TFRECSYS_DATA_ROOT", '../../data')
+        self.data_path = os.path.join(data_root, dataset)
+        train_file = 'train.txt'
+        test_file = os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")
 
-        def load_standard(filepath, is_lastfm):
+        def load_standard(filepath):
             u_list, i_list = [], []
             try:
                 with open(filepath, 'r') as f:
@@ -18,22 +20,17 @@ class Dataset:
                         parts = line.strip().split()
                         if len(parts) == 0: continue
                         u = int(parts[0])
-                        if is_lastfm:
-                            if len(parts) >= 2:
-                                u_list.append(u - 1)
-                                i_list.append(int(parts[1]) - 1)
-                        else:
-                            for i in parts[1:]:
-                                u_list.append(u)
-                                i_list.append(int(i))
+                        for i in parts[1:]:
+                            u_list.append(u)
+                            i_list.append(int(i))
             except FileNotFoundError:
                 pass
             df = pd.DataFrame({'u': u_list, 'i': i_list, 'r': [1.0]*len(u_list), 't': [0]*len(u_list)})
             return df
 
-        self.train_df = load_standard(self.data_path + '/' + train_file, dataset == 'lastfm')
+        self.train_df = load_standard(os.path.join(self.data_path, train_file))
         self.valid_df = pd.DataFrame({'u': [], 'i': [], 'r': [], 't': []})
-        self.test_df = load_standard(self.data_path + '/' + test_file, dataset == 'lastfm')
+        self.test_df = load_standard(os.path.join(self.data_path, test_file))
 
         global_uid = set(set(self.train_df['u'].unique()).union(set(self.valid_df['u'].unique()))).union(set(self.test_df['u'].unique()))
         global_iid = set(set(self.train_df['i'].unique()).union(set(self.valid_df['i'].unique()))).union(set(self.test_df['i'].unique()))

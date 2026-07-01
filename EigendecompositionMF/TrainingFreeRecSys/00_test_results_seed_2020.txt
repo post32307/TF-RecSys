@@ -1,27 +1,6 @@
 Final Test Results Summary (Seed: 2020)
 Run started:
-Wed Jul  1 19:14:13 2026 : SGFCF / amazon-electronics
+Wed Jul  1 21:59:41 2026 : BSPM / amazon-electronics
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
-SGFCF      | amazon-electronics   | (Test) Recall@20: 0.1439, NDCG@20: 0.1123                    | 00:03    | k=32, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
-
-SGFCF      | citeulike            | (Test) Recall@20: 0.0268, NDCG@20: 0.0859                    | 00:05    | k=64, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
-
-SGFCF      | lastfm               | (Test) Recall@20: 0.2765, NDCG@20: 0.2178                    | 00:03    | k=64, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
-
-SGFCF      | epinions             | (Test) Recall@20: 0.0882, NDCG@20: 0.0524                    | 00:15    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
-
-SGFCF      | yelp                 | (Test) Recall@20: 0.1376, NDCG@20: 0.0833                    | 00:22    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
-
-SGFCF      | amazon-CD            | (Test) Recall@20: 0.1084, NDCG@20: 0.0577                    | 00:22    | k=256, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
-
-SGFCF      | douban-book          | (Test) Recall@20: 0.2162, NDCG@20: 0.2024                    | 00:32    | k=512, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
-
-SGFCF      | news                 | (Test) Recall@20: 0.2336, NDCG@20: 0.1557                    | 01:11    | k=64, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
-
-SGFCF      | movielens            | (Test) Recall@20: 0.2743, NDCG@20: 0.4135                    | 00:37    | k=128, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
-
-SGFCF      | gowalla              | (Test) Recall@20: 0.1838, NDCG@20: 0.1487                    | 00:39    | k=1024, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
-
-SGFCF      | yelp2018             | (Test) Recall@20: 0.0745, NDCG@20: 0.0619                    | 01:02    | k=512, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5

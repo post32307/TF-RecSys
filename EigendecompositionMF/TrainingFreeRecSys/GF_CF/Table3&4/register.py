@@ -6,12 +6,13 @@ import utils
 from pathlib import Path
 from pprint import pprint
 
-DATA_ROOT = Path(os.environ.get("TFRECSYS_DATA_ROOT", Path(__file__).resolve().parents[3] / "data"))
+DATA_ROOT = Path(os.environ.get(
+    "TFRECSYS_DATA_ROOT",
+    Path(__file__).resolve().parents[3] / "data" / f"00_dataset_seed_{world.seed}",
+))
 
-if world.dataset in ['gowalla', 'yelp2018', 'amazon-book', 'dummy_small', 'dummy_large', 'amazon-CD','amazon-electronics','citeulike','movielens', 'news', 'douban-book','epinions','yelp']:
+if world.dataset in ['lastfm', 'gowalla', 'yelp2018', 'amazon-book', 'dummy_small', 'dummy_large', 'amazon-CD','amazon-electronics','citeulike','movielens', 'news', 'douban-book','epinions','yelp']:
     dataset = dataloader.Loader(path=str(DATA_ROOT / world.dataset))
-elif world.dataset == 'lastfm':
-    dataset = dataloader.LastFM(path=str(DATA_ROOT / "lastfm"))
 
 print('===========config================')
 pprint(world.config)

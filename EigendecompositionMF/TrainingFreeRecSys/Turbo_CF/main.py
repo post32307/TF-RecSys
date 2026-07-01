@@ -40,8 +40,9 @@ if __name__ == "__main__":
     data_root_override = os.environ.get("TFRECSYS_DATA_ROOT")
     path_tr = f"{current_directory}/dataset/{dataset}_train.npz"
     path_ts = f"{current_directory}/dataset/{dataset}_test.npz"
+    use_npz_cache = os.environ.get("TFRECSYS_USE_NPZ", "0") == "1"
     
-    if not data_root_override and os.path.exists(path_tr) and os.path.exists(path_ts):
+    if use_npz_cache and not data_root_override and os.path.exists(path_tr) and os.path.exists(path_ts):
         R_tr = csr2torch(sp.load_npz(path_tr)).to(device)
         R_ts = csr2torch(sp.load_npz(path_ts)).to(device)
     else:
@@ -53,28 +54,21 @@ if __name__ == "__main__":
                     parts = line.strip().split()
                     if len(parts) == 0: continue
                     u = int(parts[0])
-                    if dataset == "lastfm":
-                        i_idx = int(parts[1]) - 1
-                        u = u - 1
+                    for i in parts[1:]:
+                        i_idx = int(i)
                         rows.append(u)
                         cols.append(i_idx)
                         data.append(1.0)
                         if u > mu: mu = u
                         if i_idx > mi: mi = i_idx
-                    else:
-                        for i in parts[1:]:
-                            i_idx = int(i)
-                            rows.append(u)
-                            cols.append(i_idx)
-                            data.append(1.0)
-                            if u > mu: mu = u
-                            if i_idx > mi: mi = i_idx
             return rows, cols, data, mu, mi
 
-        data_root = data_root_override or os.path.abspath(os.path.join(current_directory, "..", "..", "data"))
+        data_root = data_root_override or os.path.abspath(
+            os.path.join(current_directory, "..", "..", "data", f"00_dataset_seed_{args.seed}")
+        )
         data_dir = os.path.abspath(os.path.join(data_root, dataset))
-        train_file = "data1.txt" if dataset == "lastfm" else "train.txt"
-        test_file = "test1.txt" if dataset == "lastfm" else "test.txt"
+        train_file = "train.txt"
+        test_file = os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")
         
         tr_r, tr_c, tr_d, mu1, mi1 = load_txt(os.path.join(data_dir, train_file))
         ts_r, ts_c, ts_d, mu2, mi2 = load_txt(os.path.join(data_dir, test_file))

@@ -29,8 +29,8 @@ def load_txt(filename, dataset):
             if len(parts) == 0:
                 continue
             u = int(parts[0])
-            if dataset == "lastfm":
-                i_idx = int(parts[1])
+            for i in parts[1:]:
+                i_idx = int(i)
                 rows.append(u)
                 cols.append(i_idx)
                 data.append(1.0)
@@ -38,16 +38,6 @@ def load_txt(filename, dataset):
                     mu = u
                 if i_idx > mi:
                     mi = i_idx
-            else:
-                for i in parts[1:]:
-                    i_idx = int(i)
-                    rows.append(u)
-                    cols.append(i_idx)
-                    data.append(1.0)
-                    if u > mu:
-                        mu = u
-                    if i_idx > mi:
-                        mi = i_idx
     return rows, cols, data, mu, mi
 
 
@@ -138,11 +128,11 @@ def build_dual_score_fn(X, lambda_, block_size):
 
 data_root = os.environ.get(
     "TFRECSYS_DATA_ROOT",
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", f"00_dataset_seed_{args.seed}")),
 )
 data_dir = os.path.abspath(os.path.join(data_root, args.dataset))
-train_file = "data1.txt" if args.dataset == "lastfm" else "train.txt"
-test_file = "test1.txt" if args.dataset == "lastfm" else "test.txt"
+train_file = "train.txt"
+test_file = os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")
 
 tr_r, tr_c, tr_d, mu1, mi1 = load_txt(os.path.join(data_dir, train_file), args.dataset)
 ts_r, ts_c, ts_d, mu2, mi2 = load_txt(os.path.join(data_dir, test_file), args.dataset)

@@ -48,28 +48,21 @@ def load_txt(filename):
             parts = line.strip().split()
             if len(parts) == 0: continue
             u = int(parts[0])
-            if dataset == "lastfm":
-                i_idx = int(parts[1])
+            for i in parts[1:]:
+                i_idx = int(i)
                 rows.append(u)
                 cols.append(i_idx)
                 if u > mu: mu = u
                 if i_idx > mi: mi = i_idx
-            else:
-                for i in parts[1:]:
-                    i_idx = int(i)
-                    rows.append(u)
-                    cols.append(i_idx)
-                    if u > mu: mu = u
-                    if i_idx > mi: mi = i_idx
     return pd.DataFrame({'user': rows, 'item': cols}), mu, mi
 
 data_root = os.environ.get(
     "TFRECSYS_DATA_ROOT",
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", f"00_dataset_seed_{args.seed}")),
 )
 data_dir = os.path.abspath(os.path.join(data_root, dataset))
-train_file = "data1.txt" if dataset == "lastfm" else "train.txt"
-test_file = "test1.txt" if dataset == "lastfm" else "test.txt"
+train_file = "train.txt"
+test_file = os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")
 
 df_train, mu1, mi1 = load_txt(os.path.join(data_dir, train_file))
 df_test, mu2, mi2 = load_txt(os.path.join(data_dir, test_file))

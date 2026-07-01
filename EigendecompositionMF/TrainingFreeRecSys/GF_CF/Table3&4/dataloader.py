@@ -231,7 +231,7 @@ class Loader(BasicDataset):
         self.n_user = 0
         self.m_item = 0
         train_file = path + '/train.txt'
-        test_file = path + '/test.txt'
+        test_file = path + '/' + os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")
         self.path = path
         trainUniqueUsers, trainItem, trainUser = [], [], []
         testUniqueUsers, testItem, testUser = [], [], []
