@@ -1,86 +1,27 @@
 Final Test Results Summary (Seed: 2026)
 Run started:
-Thu Jun 25 21:53:21 2026 : BSPM / amazon-CD
-Thu Jun 25 22:28:45 2026 : BSPM / amazon-CD
-Thu Jun 25 23:33:31 2026 : BSPM / amazon-CD
-Fri Jun 26 06:32:48 2026 : BSPM / news
-Fri Jun 26 16:57:06 2026 : BSPM / gowalla
+Wed Jul  1 20:04:36 2026 : SGFCF / amazon-electronics
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
-BSPM       | amazon-electronics   | (Test) Recall@20: 0.136609, NDCG@20: 0.103536                | 00:05    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=32
-EASE       | amazon-electronics   | (Test) Recall@20: 0.1352, NDCG@20: 0.1032                    | 00:01    | lambda_=200
-GF-CF      | amazon-electronics   | (Test) Recall@20: 0.143122, NDCG@20: 0.108702                | 00:04    | k=32
-PGSP       | amazon-electronics   | (Test) Recall@20: 0.1387, NDCG@20: 0.1035                    | 00:02    | k=32, phi=0.5
-TurboCF    | amazon-electronics   | (Test) Recall@20: 0.1413, NDCG@20: 0.107                     | 00:05    | alpha=0.5, power=1.0, filter=3
 SGFCF      | amazon-electronics   | (Test) Recall@20: 0.1421, NDCG@20: 0.1078                    | 00:03    | k=32, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
 
-BSPM       | citeulike            | (Test) Recall@20: 0.0202843, NDCG@20: 0.0595405              | 00:51    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=32
-EASE       | citeulike            | (Test) Recall@20: 0.0238, NDCG@20: 0.0779                    | 00:29    | lambda_=2000
-GF-CF      | citeulike            | (Test) Recall@20: 0.0206016, NDCG@20: 0.0601994              | 00:38    | k=32
-PGSP       | citeulike            | (Test) Recall@20: 0.025, NDCG@20: 0.073                      | 00:02    | k=512, phi=0.5
-TurboCF    | citeulike            | (Test) Recall@20: 0.0209, NDCG@20: 0.0633                    | 00:05    | alpha=0.9, power=0.5, filter=1
-SGFCF      | citeulike            | (Test) Recall@20: 0.0775, NDCG@20: 0.0859                    | 00:06    | k=64, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | citeulike            | (Test) Recall@20: 0.0268, NDCG@20: 0.0859                    | 00:06    | k=64, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
 
-BSPM       | lastfm               | (Test) Recall@20: 0.274663, NDCG@20: 0.213617                | 00:06    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=128
-EASE       | lastfm               | (Test) Recall@20: 0.2569, NDCG@20: 0.2024                    | 00:02    | lambda_=200
-GF-CF      | lastfm               | (Test) Recall@20: 0.275317, NDCG@20: 0.213821                | 00:06    | k=128
-PGSP       | lastfm               | (Test) Recall@20: 0.2826, NDCG@20: 0.129                     | 00:02    | k=128, phi=0.5
-TurboCF    | lastfm               | (Test) Recall@20: 0.2714, NDCG@20: 0.2114                    | 00:03    | alpha=0.5, power=0.5, filter=1
 SGFCF      | lastfm               | (Test) Recall@20: 0.2765, NDCG@20: 0.2178                    | 00:04    | k=64, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
 
-BSPM       | epinions             | (Test) Recall@20: 0.0490875, NDCG@20: 0.0271699              | 05:13    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=1024
-EASE       | epinions             | (Test) Recall@20: 0.0757, NDCG@20: 0.0464                    | 08:12    | lambda_=500
-GF-CF      | epinions             | (Test) Recall@20: 0.0371885, NDCG@20: 0.0205216              | 03:47    | k=1024
-PGSP       | epinions             | (Test) Recall@20: 0.0583, NDCG@20: 0.0322                    | 02:28    | k=512, phi=0.25
-TurboCF    | epinions             | (Test) Recall@20: 0.0609, NDCG@20: 0.0369                    | 00:37    | alpha=0.7, power=0.5, filter=1
-SGFCF      | epinions             | (Test) Recall@20: 0.0888, NDCG@20: 0.0524                    | 00:16    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | epinions             | (Test) Recall@20: 0.0881, NDCG@20: 0.0524                    | 00:16    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
 
-BSPM       | yelp                 | (Test) Recall@20: 0.102269, NDCG@20: 0.0585368               | 03:36    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=1024
-EASE       | yelp                 | (Test) Recall@20: 0.1216, NDCG@20: 0.0739                    | 01:10    | lambda_=500
-GF-CF      | yelp                 | (Test) Recall@20: 0.102345, NDCG@20: 0.058485                | 02:16    | k=1024
-PGSP       | yelp                 | (Test) Recall@20: 0.104, NDCG@20: 0.0598                     | 05:38    | k=1024, phi=0.5
-TurboCF    | yelp                 | (Test) Recall@20: 0.1194, NDCG@20: 0.0711                    | 00:26    | alpha=0.5, power=0.5, filter=1
-SGFCF      | yelp                 | (Test) Recall@20: 0.1393, NDCG@20: 0.0833                    | 00:23    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp                 | (Test) Recall@20: 0.1375, NDCG@20: 0.0832                    | 00:22    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
 
-BSPM       | amazon-CD            | (Test) Recall@20: 0.0638589, NDCG@20: 0.0306993              | 09:20    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=1024
-EASE       | amazon-CD            | (Test) Recall@20: 0.0906, NDCG@20: 0.0513                    | 04:25    | lambda_=100
-GF-CF      | amazon-CD            | (Test) Recall@20: 0.0566598, NDCG@20: 0.0271218              | 04:45    | k=1024
-PGSP       | amazon-CD            | (Test) Recall@20: 0.0713, NDCG@20: 0.0361                    | 00:22    | k=512, phi=0.5
-TurboCF    | amazon-CD            | (Test) Recall@20: 0.0721, NDCG@20: 0.0385                    | 01:01    | alpha=0.5, power=0.5, filter=1
-SGFCF      | amazon-CD            | (Test) Recall@20: 0.109, NDCG@20: 0.0578                     | 00:21    | k=256, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | amazon-CD            | (Test) Recall@20: 0.1085, NDCG@20: 0.0578                    | 00:22    | k=256, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
 
-BSPM       | douban-book          | (Test) Recall@20: 0.185503, NDCG@20: 0.166909                | 02:00    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=1024
-EASE       | douban-book          | (Test) Recall@20: 0.2087, NDCG@20: 0.196                     | 01:08    | lambda_=200
-GF-CF      | douban-book          | (Test) Recall@20: 0.180558, NDCG@20: 0.162376                | 01:34    | k=1024
-PGSP       | douban-book          | (Test) Recall@20: 0.1632, NDCG@20: 0.1343                    | 00:16    | k=1024, phi=0.75
-TurboCF    | douban-book          | (Test) Recall@20: 0.1796, NDCG@20: 0.1593                    | 00:22    | alpha=0.5, power=1.0, filter=1
-SGFCF      | douban-book          | (Test) Recall@20: 0.2251, NDCG@20: 0.1954                    | 00:31    | k=256, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | douban-book          | (Test) Recall@20: 0.2099, NDCG@20: 0.1954                    | 00:31    | k=256, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
 
-BSPM       | news                 | (Test) Recall@20: 0.22246, NDCG@20: 0.147744                 | 03:26    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=1024
-EASE       | news                 | (Test) Recall@20: 0.2347, NDCG@20: 0.1581                    | 01:13    | lambda_=1000
-GF-CF      | news                 | (Test) Recall@20: 0.214789, NDCG@20: 0.139105                | 02:07    | k=1024
-PGSP       | news                 | (Test) Recall@20: 0.2092, NDCG@20: 0.133                     | 23:55    | k=1024, phi=0.5
-TurboCF    | news                 | (Test) Recall@20: 0.222, NDCG@20: 0.1482                     | 09:49    | alpha=0.7, power=1.5, filter=2
-SGFCF      | news                 | (Test) Recall@20: 0.2344, NDCG@20: 0.1557                    | 01:13    | k=64, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | news                 | (Test) Recall@20: 0.2337, NDCG@20: 0.1557                    | 01:11    | k=64, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
 
-BSPM       | movielens            | (Test) Recall@20: 0.275539, NDCG@20: 0.416039                | 00:13    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=64
-EASE       | movielens            | (Test) Recall@20: 0.276, NDCG@20: 0.4219                     | 00:04    | lambda_=1000
-GF-CF      | movielens            | (Test) Recall@20: 0.271569, NDCG@20: 0.408102                | 00:10    | k=128
-PGSP       | movielens            | (Test) Recall@20: 0.2743, NDCG@20: 0.4108                    | 00:26    | k=64, phi=0.0
-TurboCF    | movielens            | (Test) Recall@20: 0.2574, NDCG@20: 0.3922                    | 00:49    | alpha=0.7, power=1.0, filter=2
-SGFCF      | movielens            | (Test) Recall@20: 0.3959, NDCG@20: 0.4066                    | 00:37    | k=64, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | movielens            | (Test) Recall@20: 0.2743, NDCG@20: 0.4135                    | 00:36    | k=128, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
 
-BSPM       | gowalla              | (Test) Recall@20: 0.191192, NDCG@20: 0.159244                | 04:44    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=512
-EASE       | gowalla              | (Test) Recall@20: 0.1764, NDCG@20: 0.1466                    | 05:53    | lambda_=100
-GF-CF      | gowalla              | (Test) Recall@20: 0.187611, NDCG@20: 0.153963                | 02:45    | k=512
-PGSP       | gowalla              | (Test) Recall@20: 0.1919, NDCG@20: 0.1608                    | 09:56    | k=1024, phi=0.75
-TurboCF    | gowalla              | (Test) Recall@20: 0.1784, NDCG@20: 0.1469                    | 01:01    | alpha=0.5, power=0.5, filter=1
-SGFCF      | gowalla              | (Test) Recall@20: 0.1879, NDCG@20: 0.1486                    | 00:39    | k=1024, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | gowalla              | (Test) Recall@20: 0.1838, NDCG@20: 0.1486                    | 00:39    | k=1024, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
 
-BSPM       | yelp2018             | (Test) Recall@20: 0.0712937, NDCG@20: 0.0584185              | 02:33    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=256
-EASE       | yelp2018             | (Test) Recall@20: 0.0654, NDCG@20: 0.0552                    | 05:02    | lambda_=200
-GF-CF      | yelp2018             | (Test) Recall@20: 0.0702565, NDCG@20: 0.0579251              | 03:11    | k=512
-PGSP       | yelp2018             | (Test) Recall@20: 0.0682, NDCG@20: 0.0562                    | 09:03    | k=512, phi=0.25
-TurboCF    | yelp2018             | (Test) Recall@20: 0.0647, NDCG@20: 0.0536                    | 01:10    | alpha=0.5, power=0.5, filter=1
-SGFCF      | yelp2018             | (Test) Recall@20: 0.0774, NDCG@20: 0.0619                    | 01:02    | k=512, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Test) Recall@20: 0.0746, NDCG@20: 0.062                     | 01:01    | k=512, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5

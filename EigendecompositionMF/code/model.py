@@ -4,11 +4,14 @@ from dataloader import BasicDataset
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigs
+from scipy.sparse.linalg import eigsh
 import torch.nn.functional as F
 
 import metrics
 import helpers
 import multiprocessing
+
+import torch.nn as nn
 
 class PSEmodel:
     def __init__(self, config: dict, dataset: BasicDataset):
@@ -16,8 +19,6 @@ class PSEmodel:
         self.dataset = dataset
         self.n_users = dataset.n_users
         self.m_items = dataset.m_items
-        self.num_users = self.n_users
-        self.num_items = self.m_items
         self.device = torch.device(config['device'])   
         self.k = config['k']
         self.Sigmoid = F.sigmoid
@@ -28,6 +29,7 @@ class PSEmodel:
         rowsum[rowsum == 0] = 1e-9
         self.D = sp.diags(rowsum) #CSR
         self.D_inv = sp.diags(1. / rowsum) #CSR
+
 
 
     # PSE Functions
@@ -52,7 +54,7 @@ class PSEmodel:
     def Eigendecomposition(self,X):
         if torch.is_tensor(X):
             X = X.cpu().numpy()
-        Eigs,U = eigs(X, k=self.k,which='LR')
+        Eigs,U = eigsh(X, k=self.k,which='LA')
         U = U.real
         Eigs = Eigs.real
         U = torch.tensor(U, dtype=torch.float32).to(self.device)
@@ -86,8 +88,8 @@ class PSEmodel:
     def getUsersRating(self,X,users):
         X = X.to(self.device)
         users = users.long()
-        users_emb = X[:self.num_users,:]
-        items_emb = X[self.num_users:,:]
+        users_emb = X[:self.n_users,:]
+        items_emb = X[self.n_users:,:]
         users_emb = users_emb[users,:]
         items_emb = items_emb
         scores = torch.matmul(users_emb, items_emb.t())
@@ -108,7 +110,7 @@ class PSEmodel:
                 'ndcg':np.array(ndcg)}
 
     def Test(self, X, dataset, users=None, items=None, multicore=0):
-        if X.shape == (self.num_users, self.num_items):
+        if X.shape == (self.n_users, self.m_items):
             return self.Test_RatingMatrix(X, dataset, users, items, multicore)
         u_batch_size = world.config['test_u_batch_size']
         testDict: dict = dataset.testDict

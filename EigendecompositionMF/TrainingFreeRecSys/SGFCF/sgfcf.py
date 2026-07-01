@@ -320,8 +320,11 @@ def test():
                     
             ndcg10 += (dcg10 / idcg_set[all10])
             ndcg20 += (dcg20 / idcg_set[all20])
-            recall10 += (hit10 / all10)
-            recall20 += (hit20 / all20)
+            # Original SGFCF used capped Recall denominators:
+            # recall10 += (hit10 / all10)
+            # recall20 += (hit20 / all20)
+            recall10 += (hit10 / test_lens)
+            recall20 += (hit20 / test_lens)
 
     if valid_users > 0:
         ndcg10, ndcg20 = round(ndcg10 / valid_users, 4), round(ndcg20 / valid_users, 4)

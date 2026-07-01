@@ -19,6 +19,8 @@ print(">>SEED:", world.seed)
 # ==============================
 import dataloader
 
+from tqdm import tqdm  # Standard progress bar library
+
 sources_path = os.path.join(os.path.dirname(__file__), "sources")
 if sources_path not in sys.path:
     sys.path.append(sources_path)
@@ -59,111 +61,24 @@ else:
     world.cprint("not enable tensorflowboard")
 
 try:
+    import scipy.sparse as sp
     import itertools
-
-    def arbitrary_fifth_order_filter(lambda_values, w0=1.0, w1=1.0, w2=0.0, w3=0.0, w4=0.0, w5=0.0):
-        """
-        Applies an arbitrary 5th-order polynomial filter.
-        f(lam) = w0 + w1*lam + w2*lam^2 + w3*lam^3 + w4*lam^4 + w5*lam^5
-        """
-        lam = np.asarray(lambda_values)
-        
-        # Scale to [-1, 1] to keep polynomial powers numerically stable
-        max_mag = np.max(np.abs(lam))
-        if max_mag > 0:
-            lam = lam / max_mag
-            
-        return (w0 + 
-                w1 * lam + 
-                w2 * (lam ** 2) + 
-                w3 * (lam ** 3) + 
-                w4 * (lam ** 4) + 
-                w5 * (lam ** 5))
-
+    # ---------------------------------------------------------
+    # 1. Define Paths & Load Target Main Datasets
+    # ---------------------------------------------------------
     data_root = os.path.join(world.ROOT_PATH, "data")
     dataset_name = world.dataset
     dataset_path = os.path.join(data_root, dataset_name)
-    world.cprint("Exact Arbitrary 5th-Order Polynomial Search")
-    
+    search_root = os.path.join(data_root, "00_search_sets_seed_"+str(world.seed))
+    split_dir = os.path.join(search_root, dataset_name)
+
+    if not os.path.isdir(dataset_path):
+        raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
+    world.cprint(f"Loading Full Evaluation Dataset: {dataset_name}")
     if dataset_name == "lastfm":
-        dataset = dataloader.LastFM(path=dataset_path)
+        test_dataset = dataloader.LastFM(path=dataset_path)
     else:
-        dataset = dataloader.Loader(path=dataset_path)
-    
-    model = model.PSEmodel(world.config, dataset)
-    X_cheb = model.getNormAdj(model.A, model.D_inv, 0.2, 0.4)
-    U_L, U_R, Eigs = model.Eigendecomposition_Asym(X_cheb)
-
-    # Pre-extract the numpy array to avoid redundant operations inside the loop
-    eigs_np = Eigs.detach().cpu().numpy()
-    
-    # Fast search space to avoid 500k+ loops (5^6 = 15,625 iterations)
-    coeff_space = [-1.0, -0.5, 0.0, 0.5, 1.0]
-    
-    # UNCOMMENT BELOW IF YOU PREFER YOUR ORIGINAL 9-ELEMENT ARRAY (9^6 = 531,441 iterations):
-    # coeff_space = [-5.0, -3.0, -1.0, -0.5, 0.0, 0.5, 1.0, 3.0, 5.0]
-    
-    best_param_1 = [0, 0, 0, 0, 0, 0]
-    best_result_1 = {"recall": -10000.0}
-    best_param_2 = [0, 0, 0, 0, 0, 0]
-    best_result_2 = {"recall": -10000.0}
-    
-    print("\nStarting Grid Search for Arbitrary 5th-Order Polynomial...")
-    
-    with torch.no_grad():
-        # itertools.product creates every combination of w0, w1, w2, w3, w4, w5
-        for w0, w1, w2, w3, w4, w5 in itertools.product(coeff_space, repeat=6):
-            # Skip the all-zero filter to save computation
-            if w0 == 0.0 and w1 == 0.0 and w2 == 0.0 and w3 == 0.0 and w4 == 0.0 and w5 == 0.0:
-                continue            
-                
-            exact_f_Eigs_Arb = torch.from_numpy(
-                arbitrary_fifth_order_filter(eigs_np, w0=w0, w1=w1, w2=w2, w3=w3, w4=w4, w5=w5)
-            ).to(world.device)        
-            
-            Exact_Arb_Matrix = U_R @ torch.diag(exact_f_Eigs_Arb)
-            S = U_R @ torch.diag(exact_f_Eigs_Arb) @ U_R.T
-            
-            # Evaluate the filter
-            result_1 = model.Test(Exact_Arb_Matrix, model.dataset)
-            result_2 = model.Test_RatingMatrix(S, model.dataset)
-            
-            # Track best parameters
-            if best_result_1["recall"] < result_1["recall"]:
-                best_result_1 = result_1
-                best_param_1 = [w0, w1, w2, w3, w4, w5]
-            if best_result_2["recall"] < result_2["recall"]:
-                best_result_2 = result_2
-                best_param_2 = [w0, w1, w2, w3, w4, w5]
-            del Exact_Arb_Matrix, S
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-                
-            print(f"Coeff {(w0, w1, w2, w3, w4, w5)} : {result_1['recall']}")
-            print(f"Coeff {(w0, w1, w2, w3, w4, w5)} : {result_2['recall']}")
-            # break
-        
-    print("-" * 100)
-    print("BEST RESULT (embedding):", best_result_1)
-    print("BEST PARAM (embedding):", best_param_1)
-    print("-" * 70)
-    print("BEST RESULT (rating):", best_result_2)
-    print("BEST PARAM (rating):", best_param_2)
-    print("-" * 100)
-
-    sys.exit()
-    
-    
-
-    print()
-    world.cprint("Validation Search and Final Test")
-
-    data_root = os.path.join(world.ROOT_PATH, "data")
-    search_root = os.path.join(data_root, "00_search_sets_seed_2026")
-    val_results_file = os.path.join(world.CODE_PATH, "validation_search_results_seed_2026.txt")
-    test_results_file = os.path.join(world.CODE_PATH, "test_results_seed_2026.txt")
-    k_values = [16, 32, 64, 128, 256, 512]   # [32,64,128,256,512,1024]
-    search_step = 0.1
+        test_dataset = dataloader.Loader(path=dataset_path)
 
     def link_or_copy(src, dst):
         try:
@@ -171,101 +86,110 @@ try:
         except OSError:
             shutil.copyfile(src, dst)
 
-    def make_dataset(dataset_name, split):
-        world.dataset = dataset_name
-        if split == "validation":
-            split_dir = os.path.join(search_root, dataset_name)
-            with tempfile.TemporaryDirectory(prefix=f"pse-{dataset_name}-val-") as tmpdir:
-                if dataset_name == "lastfm":
-                    link_or_copy(os.path.join(split_dir, "train_val.txt"), os.path.join(tmpdir, "data1.txt"))
-                    link_or_copy(os.path.join(split_dir, "validation_val.txt"), os.path.join(tmpdir, "test1.txt"))
-                    link_or_copy(
-                        os.path.join(data_root, "lastfm", "trustnetwork.txt"),
-                        os.path.join(tmpdir, "trustnetwork.txt")
-                    )
-                    return dataloader.LastFM(path=tmpdir)
-                link_or_copy(os.path.join(split_dir, "train_val.txt"), os.path.join(tmpdir, "train.txt"))
-                link_or_copy(os.path.join(split_dir, "validation_val.txt"), os.path.join(tmpdir, "test.txt"))
-                return dataloader.Loader(path=tmpdir)
+    # ---------------------------------------------------------
+    # DYNAMIC MULTI-SCALE RESOLUTION LAYOUT GENERATION
+    # ---------------------------------------------------------
+    val_true = 2
+    #   0: skip parameter search and test with default values
+    #   1: search on validation dataset, then test on test dataset
+    #   2: search on test dataset, then test on test dataset
+    max_k = world.config['k']  # e.g., 128
+    k_interval = 64
+    n = 1
+    b = 8
+    if b < 1:
+        raise ValueError("b must be at least 1.")
+    if val_true not in (0, 1, 2):
+        raise ValueError("val_true must be 0, 1, or 2.")
+    if val_true == 1 and not os.path.isdir(split_dir):
+        raise FileNotFoundError(f"Validation split directory not found: {split_dir}")
+    print(f"n : {n} / b : {b} / val_true : {val_true}")
+    
+    default_tau = 0.6
+    default_eps1 = 0.0
+    default_eps2 = 0.0
+    default_delta = 0.1
+    default_beta = [1.0 for _ in range(b)]
+    # Example for setting interval-specific default betas:
+    # default_beta[0]=-0.5
+    # default_beta[1]=-0.5
+    # default_beta[2]=-0.5
+    # default_beta[3]=-0.5
+    # default_beta[4]=0.5
+    # default_beta[5]=1
+    if len(default_beta) != b:
+        raise ValueError("default_beta must have exactly b values.")
+    if any(default_beta[idx] > default_beta[idx + 1] for idx in range(b - 1)):
+        raise ValueError("default_beta values must be nondecreasing across intervals.")
 
-        dataset_dir = os.path.join(data_root, dataset_name)
-        if dataset_name == "lastfm":
-            return dataloader.LastFM(path=dataset_dir)
-        return dataloader.Loader(path=dataset_dir)
+    k_dimensions = []
+    current_dim = max_k
+    current_n = n
+    while current_dim >= 32 and current_n > 0:
+        k_dimensions.append(current_dim)
+        current_dim -= k_interval
+        current_n -= 1
+        
+    num_scales = len(k_dimensions)
+    world.cprint(f"Dynamic Scale Subspaces Enabled: {k_dimensions} (N={num_scales} distinct delta steps)")
 
-    def selected_dataset():
-        dataset_name = world.dataset
-        dataset_dir = os.path.join(data_root, dataset_name)
-        split_dir = os.path.join(search_root, dataset_name)
-        if not os.path.isdir(dataset_dir):
-            raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
-        if not os.path.isdir(split_dir):
-            raise FileNotFoundError(f"Validation split directory not found: {split_dir}")
-        return dataset_name
+    # ---------------------------------------------------------
+    # 2. Multi-Scale Search Loop with Sliced Subspaces & Separate Deltas
+    # ---------------------------------------------------------
+    eps_space = [0.0] # [0.0, 0.1, 0.3] # [0.0, 0.1, 0.3, 0.5] # Space for epsilon_1, epsilon_2
+    alpha_space_1 = [0.6] # [0.4, 0.6, 0.8]  # Space for tau
+    alpha_space_2 = [0.1] # [0.1, 0.2, 0.3]  # Space for delta
+    beta_space = [-1.0, -0.5, 0.0, 0.5, 1.0] # [-1.0, -0.5, 0.0, 0.5, 1.0] # Space for betas (ustom structural eigenvalue exponent filter space)
+    #     tau and delta control the degrees in asymmetric normalization
+    #     epsilon controls the smoothness of degree operations
+    #     beta controls the eigenvalues
+    
+    best_recall = -1.0
+    # Store dynamic keys dynamically based on scale size index
+    best_params = {"tau": default_tau, "eps1": default_eps1, "eps2": default_eps2}
+    for idx in range(num_scales):
+        best_params[f"delta{idx+1}"] = default_delta
+        best_params[f"mask{idx+1}"] = 1
+        for interval_idx in range(b):
+            best_params[f"beta{idx+1}_{interval_idx+1}"] = default_beta[interval_idx]
+    best_val_results = None
 
-    def build_components(current_model, component_k_values):
-        original_k = current_model.k
-        valid_k_values = [
-            k for k in component_k_values
-            if k < current_model.num_users + current_model.num_items - 1
-        ]
-        if not valid_k_values:
-            raise ValueError("No valid k values for this dataset")
+    def signed_eigen_power(eigs, powers):
+        return torch.sign(eigs) * torch.pow(torch.abs(eigs), powers)
 
-        max_k = max(valid_k_values)
-        current_model.k = max_k
-        X = current_model.getNormAdj(current_model.A, current_model.D_inv, 0.2, 0.4)
-        U, Eigs = current_model.Eigendecomposition(X)
-        eig_order = torch.argsort(Eigs, descending=True)
-        U = U[:, eig_order]
-        Eigs = Eigs[eig_order]
-
-        components = []
-        for k_value in valid_k_values:
-            U_k = U[:, :k_value]
-            Eigs_k = Eigs[:k_value]
-            user_U = U_k[:current_model.num_users, :]
-            item_U = U_k[current_model.num_users:, :]
-            components.append((user_U, Eigs_k, item_U))
-            print(f"  S{len(components)} constructed with k={k_value}")
-
-        current_model.k = original_k
-        return components, valid_k_values
-
-    def evaluate_weights(current_model, current_dataset, components, weights):
+    def prepare_eval_batches(current_dataset):
         u_batch_size = world.config['test_u_batch_size']
         testDict = current_dataset.testDict
+        users = list(testDict.keys())
+        if len(users) == 0:
+            return [], 0
+
+        u_batch_size = min(u_batch_size, max(1, len(users) // 10))
+        eval_batches = []
+        for batch_users in helpers.minibatch(users, batch_size=u_batch_size):
+            eval_batches.append((
+                batch_users,
+                current_dataset.getUserPosItems(batch_users),
+                [testDict[u] for u in batch_users],
+                torch.Tensor(batch_users).long().to(world.device)
+            ))
+        return eval_batches, len(users)
+
+    def test_factorized_rating(current_model, current_dataset, user_factors, item_factors, eval_batches=None, user_count=None):
         max_K = max(world.topks)
         results = {
             'precision': np.zeros(len(world.topks)),
             'recall': np.zeros(len(world.topks)),
             'ndcg': np.zeros(len(world.topks))
         }
-        users = list(testDict.keys())
-        if len(users) == 0:
+        if eval_batches is None or user_count is None:
+            eval_batches, user_count = prepare_eval_batches(current_dataset)
+        if user_count == 0:
             return results
-        u_batch_size = min(u_batch_size, max(1, len(users) // 10))
-        rating_list = []
-        groundTrue_list = []
 
         with torch.no_grad():
-            for batch_users in helpers.minibatch(users, batch_size=u_batch_size):
-                allPos = current_dataset.getUserPosItems(batch_users)
-                groundTrue = [testDict[u] for u in batch_users]
-                batch_users_gpu = torch.Tensor(batch_users).long().to(world.device)
-                rating = None
-
-                for weight, (user_U, eigs, item_U) in zip(weights, components):
-                    if weight == 0:
-                        continue
-                    component_rating = (user_U[batch_users_gpu, :] * eigs) @ item_U.t()
-                    if rating is None:
-                        rating = weight * component_rating
-                    else:
-                        rating = rating + weight * component_rating
-
-                if rating is None:
-                    rating = torch.zeros((len(batch_users), current_model.num_items), device=world.device)
+            for batch_users, allPos, groundTrue, batch_users_gpu in eval_batches:
+                rating = user_factors[batch_users_gpu, :] @ item_factors.t()
 
                 exclude_index = []
                 exclude_items = []
@@ -275,97 +199,268 @@ try:
                 rating[exclude_index, exclude_items] = -(1 << 10)
 
                 _, rating_K = torch.topk(rating, k=max_K)
-                rating_list.append(rating_K.cpu())
-                groundTrue_list.append(groundTrue)
-                del rating
+                batch_result = current_model.test_one_batch((rating_K.cpu(), groundTrue))
+                results['recall'] += batch_result['recall']
+                results['precision'] += batch_result['precision']
+                results['ndcg'] += batch_result['ndcg']
+                del rating, rating_K
 
-        for x in zip(rating_list, groundTrue_list):
-            result = current_model.test_one_batch(x)
-            results['recall'] += result['recall']
-            results['precision'] += result['precision']
-            results['ndcg'] += result['ndcg']
-
-        results['recall'] /= float(len(users))
-        results['precision'] /= float(len(users))
-        results['ndcg'] /= float(len(users))
+        results['recall'] /= float(user_count)
+        results['precision'] /= float(user_count)
+        results['ndcg'] /= float(user_count)
         return results
 
-    def generate_weight_indices(total, parts):
-        if parts == 1:
-            yield [total]
-            return
-        for value in range(total + 1):
-            for rest in generate_weight_indices(total - value, parts - 1):
-                yield [value] + rest
+    if val_true == 0:
+        world.cprint("Skipping validation search and using default hyperparameters.")
+    else:
+        validation_start_time = time.time()
+        val_dataset = None
+        tmpdir_context = tempfile.TemporaryDirectory(prefix=f"pse-{dataset_name}-val-") if val_true == 1 else None
+        if val_true == 1:
+            world.cprint(f"Instantiating Temporary Directory for Seed Search Dataset Split")
+            search_target_name = "Validation"
+        else:
+            world.cprint(f"Using Full Test Dataset for Parameter Search: {dataset_name}")
+            search_target_name = "Test"
 
-    def format_weights(weights):
-        return ",".join(f"a{idx + 1}={weight:.2f}" for idx, weight in enumerate(weights))
+        try:
+            tmpdir = tmpdir_context.__enter__() if tmpdir_context is not None else None
+            if dataset_name == "lastfm":
+                if val_true == 1:
+                    link_or_copy(os.path.join(split_dir, "train_val.txt"), os.path.join(tmpdir, "data1.txt"))
+                    link_or_copy(os.path.join(split_dir, "validation_val.txt"), os.path.join(tmpdir, "test1.txt"))
+                    link_or_copy(os.path.join(data_root, "lastfm", "trustnetwork.txt"), os.path.join(tmpdir, "trustnetwork.txt"))
+                    val_dataset = dataloader.LastFM(path=tmpdir)
+                else:
+                    val_dataset = dataloader.LastFM(path=dataset_path)
+            else:
+                if val_true == 1:
+                    link_or_copy(os.path.join(split_dir, "train_val.txt"), os.path.join(tmpdir, "train.txt"))
+                    link_or_copy(os.path.join(split_dir, "validation_val.txt"), os.path.join(tmpdir, "test.txt"))
+                    val_dataset = dataloader.Loader(path=tmpdir)
+                else:
+                    val_dataset = dataloader.Loader(path=dataset_path)
+            val_eval_batches, val_user_count = prepare_eval_batches(val_dataset)
 
-    def format_metrics(metrics):
-        return (
-            f"precision={metrics['precision'].tolist()} "
-            f"recall={metrics['recall'].tolist()} "
-            f"ndcg={metrics['ndcg'].tolist()}"
+            val_model = model.PSEmodel(world.config, val_dataset)
+            val_model.A = sp.bmat([[None, val_model.R], [val_model.R.T, None]], format='csr')
+            base_rowsum = np.array(val_model.A.sum(axis=1)).flatten()
+            base_rowsum[base_rowsum == 0] = 1e-9
+
+            print(f"\nStarting Optimized Dynamic N-Scale Grid Search on Seed {world.seed} {search_target_name} Data...")
+            print("-" * 80)
+            beta_interval_choices = list(itertools.combinations_with_replacement(sorted(beta_space), b))
+            total_iterations = (len(eps_space) ** 2) * len(alpha_space_1) * (len(alpha_space_2) ** num_scales) * (len(beta_interval_choices) ** num_scales) * (2 ** num_scales)
+            
+            with tqdm(total=total_iterations, desc="Validation Search Progress", unit="it") as pbar:
+                for eps2 in eps_space:
+                    rowsum = base_rowsum + eps2
+                    val_model.D_inv = sp.diags(1. / rowsum)
+
+                    for tau in alpha_space_1:
+                        val_model.k = max_k
+                        X_norm = val_model.getNormAdj(val_model.A, val_model.D_inv, alpha1=tau/2, alpha2=tau/2)
+                        U_full, Eigs_full = val_model.Eigendecomposition(X_norm)
+
+                        eig_cache = {}
+                        for idx, current_k in enumerate(k_dimensions):
+                            Eigs_slice = Eigs_full[:current_k]
+                            interval_edges = np.linspace(0, current_k, b + 1, dtype=int)
+                            for beta_tuple in beta_interval_choices:
+                                individual_betas = torch.empty(current_k, dtype=torch.float32, device=val_model.device)
+                                for interval_idx, beta_value in enumerate(beta_tuple):
+                                    start_idx = interval_edges[interval_idx]
+                                    end_idx = interval_edges[interval_idx + 1]
+                                    individual_betas[start_idx:end_idx] = beta_value
+                                eig_cache[(idx, beta_tuple)] = signed_eigen_power(Eigs_slice, individual_betas)
+
+                        for eps1 in eps_space:
+                            d_diagonal = base_rowsum + eps1
+                            d_power_cache = {
+                                delta: torch.tensor(d_diagonal ** delta, dtype=torch.float32, device=val_model.device)
+                                for delta in alpha_space_2
+                            }
+                            scaled_slice_cache = {}
+                            for idx, current_k in enumerate(k_dimensions):
+                                U_base_slice = U_full[:, :current_k]
+                                for delta, d_power in d_power_cache.items():
+                                    U_scaled = U_base_slice * d_power.unsqueeze(1)
+                                    scaled_slice_cache[(idx, delta)] = (
+                                        U_scaled[:val_model.n_users, :],
+                                        U_scaled[val_model.n_users:, :]
+                                    )
+
+                            for delta_tuple, beta_tuple_by_scale, mask_tuple in itertools.product(
+                                itertools.product(alpha_space_2, repeat=num_scales),
+                                itertools.product(beta_interval_choices, repeat=num_scales),
+                                itertools.product([0, 1], repeat=num_scales)
+                            ):
+                                if sum(mask_tuple) == 0:
+                                    pbar.update(1)
+                                    continue
+
+                                transformed_u_user_list = []
+                                transformed_u_item_list = []
+                                for idx, current_k in enumerate(k_dimensions):
+                                    if mask_tuple[idx] == 0:
+                                        continue
+
+                                    current_delta = delta_tuple[idx]
+                                    beta_tuple = beta_tuple_by_scale[idx]
+                                    u_slice, i_slice = scaled_slice_cache[(idx, current_delta)]
+                                    filtered_eigs = eig_cache[(idx, beta_tuple)]
+                                    transformed_u_user_list.append(u_slice * filtered_eigs.unsqueeze(0))
+                                    transformed_u_item_list.append(i_slice * filtered_eigs.unsqueeze(0))
+
+                                U_user_final = torch.cat(transformed_u_user_list, dim=1)
+                                U_item_final = torch.cat(transformed_u_item_list, dim=1)
+
+                                current_results = test_factorized_rating(
+                                    val_model, val_dataset, U_user_final, U_item_final,
+                                    val_eval_batches, val_user_count
+                                )
+                                current_recall = current_results['recall'][0]
+
+                                if current_recall > best_recall:
+                                    best_recall = current_recall
+                                    best_params["tau"] = tau
+                                    best_params["eps1"] = eps1
+                                    best_params["eps2"] = eps2
+                                    for idx in range(num_scales):
+                                        best_params[f"delta{idx+1}"] = delta_tuple[idx]
+                                        best_params[f"mask{idx+1}"] = mask_tuple[idx]
+                                        for interval_idx, beta_value in enumerate(beta_tuple_by_scale[idx]):
+                                            best_params[f"beta{idx+1}_{interval_idx+1}"] = beta_value
+                                    best_val_results = current_results
+
+                                pbar.set_postfix({"Best Recall": f"{best_recall:.4f}", "Cur Recall": f"{current_recall:.4f}"})
+                                pbar.update(1)
+
+                                del U_user_final, U_item_final
+                                if torch.cuda.is_available():
+                                    torch.cuda.empty_cache()
+
+                        del U_full, Eigs_full, eig_cache
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+
+            print("-" * 80)
+            print(f"GRID SEARCH ON {search_target_name.upper()} DATA COMPLETE")
+            print("Best Configuration Discovered (with Piecewise Vectorized Eigenvalue Betas):")
+            for k, v in best_params.items():
+                print(f"  {k}: {v}")
+            print(f"Validation Metrics -> {best_val_results}")
+            print("-" * 80)
+        finally:
+            if tmpdir_context is not None:
+                tmpdir_context.__exit__(None, None, None)
+
+    if val_true != 0 and best_val_results is None:
+        raise RuntimeError("Validation search did not find a valid configuration.")
+
+    if val_true != 0:
+        validation_total_runtime = time.time() - validation_start_time
+        validation_hours = int(validation_total_runtime // 3600)
+        validation_minutes = int((validation_total_runtime % 3600) // 60)
+        validation_seconds = validation_total_runtime % 60
+        print(
+            f"Validation Total Runtime: {validation_total_runtime:.2f} seconds "
+            f"({validation_hours:02d}:{validation_minutes:02d}:{validation_seconds:05.2f})"
         )
 
-    def search_best_weights(current_model, current_dataset, components):
-        grid_size = int(round(1.0 / search_step))
-        best_recall = None
-        best_weights = None
-        best_metrics = None
-        for weight_indices in generate_weight_indices(grid_size, len(components)):
-            weights = [idx * search_step for idx in weight_indices]
-            metrics = evaluate_weights(current_model, current_dataset, components, weights)
-            recall_score = metrics['recall'][0]
-            if best_recall is None or recall_score > best_recall:
-                best_recall = recall_score
-                best_weights = tuple(weights)
-                best_metrics = metrics
-            print(f"    {format_weights(weights)} | recall={metrics['recall']}")
-        return best_weights, best_metrics
+    # ---------------------------------------------------------
+    # 3. Out-Of-Sample Evaluation Using the Best Split Configurations
+    # ---------------------------------------------------------
+    world.cprint(f"\nEvaluating Best Hyperparameters on the Main Dataset Layer...")
+    
+    eval_model = model.PSEmodel(world.config, test_dataset)
+    eval_model.A = sp.bmat([[None, eval_model.R], [eval_model.R.T, None]], format='csr')
+    eval_base_rowsum = np.array(eval_model.A.sum(axis=1)).flatten()
+    eval_base_rowsum[eval_base_rowsum == 0] = 1e-9
 
-    dataset_name = selected_dataset()
-    with open(val_results_file, "w") as val_file, open(test_results_file, "w") as test_file:
-        val_file.write("dataset | k_values | best_weights | validation_metrics\n")
-        test_file.write("dataset | k_values | best_weights | test_metrics\n")
+    tau_opt = best_params['tau']
+    eps1_opt = best_params['eps1']
+    eps2_opt = best_params['eps2']
 
-        print()
-        world.cprint(f"[VALIDATION] {dataset_name}")
-        val_dataset = make_dataset(dataset_name, "validation")
-        val_model = model.PSEmodel(world.config, val_dataset)
-        val_components, valid_k_values = build_components(val_model, k_values)
-        best_weights, best_val_metrics = search_best_weights(val_model, val_dataset, val_components)
-        val_line = (
-            f"{dataset_name} | {valid_k_values} | {format_weights(best_weights)} | "
-            f"{format_metrics(best_val_metrics)}"
-        )
-        print(val_line)
-        val_file.write(val_line + "\n")
-        val_file.flush()
+    eval_rowsum = eval_base_rowsum + eps2_opt
+    eval_model.D_inv = sp.diags(1. / eval_rowsum)
+    d_diagonal_eval = eval_base_rowsum + eps1_opt
 
-        del val_components, val_model, val_dataset
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    eval_model.k = max_k
+    X_norm_eval = eval_model.getNormAdj(eval_model.A, eval_model.D_inv, alpha1=tau_opt/2, alpha2=tau_opt/2)
+    U_full_eval, Eigs_full_eval = eval_model.Eigendecomposition(X_norm_eval)
 
-        world.cprint(f"[TEST] {dataset_name}")
-        test_dataset = make_dataset(dataset_name, "test")
-        test_model = model.PSEmodel(world.config, test_dataset)
-        test_components, test_k_values = build_components(test_model, valid_k_values)
-        test_metrics = evaluate_weights(test_model, test_dataset, test_components, best_weights)
-        test_line = (
-            f"{dataset_name} | {test_k_values} | {format_weights(best_weights)} | "
-            f"{format_metrics(test_metrics)}"
-        )
-        print(test_line)
-        test_file.write(test_line + "\n")
-        test_file.flush()
+    eval_u_user_list = []
+    eval_u_item_list = []
 
-        del test_components, test_model, test_dataset
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+    for idx, current_k in enumerate(k_dimensions):
+        if best_params[f"mask{idx+1}"] == 0:
+            continue
+            
+        opt_delta_scale = best_params[f"delta{idx+1}"]
+        opt_beta_tuple = tuple(best_params[f"beta{idx+1}_{interval_idx+1}"] for interval_idx in range(b))
+        
+        U_eval_slice = U_full_eval[:, :current_k]
+        Eigs_eval_slice = Eigs_full_eval[:current_k]
+        
+        d_power_eval = torch.tensor(d_diagonal_eval ** opt_delta_scale, dtype=torch.float32, device=eval_model.device)
+        U_trans_scaled = U_eval_slice * d_power_eval.unsqueeze(1)
+        
+        u_eval_slice = U_trans_scaled[:eval_model.n_users, :]
+        i_eval_slice = U_trans_scaled[eval_model.n_users:, :]
+        
+        eval_interval_edges = np.linspace(0, current_k, b + 1, dtype=int)
+        eval_individual_betas = torch.empty(current_k, dtype=torch.float32, device=eval_model.device)
+        for interval_idx, beta_value in enumerate(opt_beta_tuple):
+            start_idx = eval_interval_edges[interval_idx]
+            end_idx = eval_interval_edges[interval_idx + 1]
+            eval_individual_betas[start_idx:end_idx] = beta_value
+        
+        filtered_eval_eigs = signed_eigen_power(Eigs_eval_slice, eval_individual_betas)
+        
+        u_eval_filtered = u_eval_slice * filtered_eval_eigs.unsqueeze(0)
+        i_eval_filtered = i_eval_slice * filtered_eval_eigs.unsqueeze(0)
+        
+        eval_u_user_list.append(u_eval_filtered)
+        eval_u_item_list.append(i_eval_filtered)
 
-    print(f"Validation results saved to {val_results_file}")
-    print(f"Test results saved to {test_results_file}")
+    U_user_eval_final = torch.cat(eval_u_user_list, dim=1)
+    U_item_eval_final = torch.cat(eval_u_item_list, dim=1)
+
+    with torch.no_grad():
+        final_test_results = test_factorized_rating(eval_model, test_dataset, U_user_eval_final, U_item_eval_final)
+        
+        print("=" * 80)
+        print(f"FINAL OUT-OF-SAMPLE TEST METRICS (MAIN DATASET : {world.dataset}):")
+        print(f"Global Tuned Configuration (seed={world.seed}): {best_params}")
+        print(f"Recall@20: {final_test_results['recall'][0]:.6f}")
+        print(f"Precision: {final_test_results['precision'].tolist()}")
+        print(f"NDCG:      {final_test_results['ndcg'].tolist()}")
+        print("=" * 80)
+
+    X_norm_eval = eval_model.getNormAdj(eval_model.A, eval_model.D_inv, alpha1=0.2, alpha2=0.4)
+    U_full_eval_L, U_full_eval_R, Eigs_full_eval = eval_model.Eigendecomposition_Asym(X_norm_eval)
+    print("Eigenvalues (first/last):",Eigs_full_eval[0].item(),Eigs_full_eval[-1].item())
+    print("Eigenvalues (min/max):",torch.min(Eigs_full_eval).item(),torch.max(Eigs_full_eval).item())
+
+    print()
+    results = eval_model.Test_RatingMatrix(U_full_eval_R[:eval_model.n_users,:] @ U_full_eval_R[eval_model.n_users:,:].T, eval_model.dataset)
+    print(f"E=U_R")
+    print(f"Recall@20: {results['recall'][0]:.6f}")
+    print(f"Precision: {results['precision'].tolist()}")
+    print(f"NDCG:      {results['ndcg'].tolist()}")
+
+    results = eval_model.Test_RatingMatrix(U_full_eval_R[:eval_model.n_users,:] @ torch.diag(Eigs_full_eval) @ U_full_eval_R[eval_model.n_users:,:].T, eval_model.dataset)
+    print(f"E=U_R Lambda^0.5")
+    print(f"Recall@20: {results['recall'][0]:.6f}")
+    print(f"Precision: {results['precision'].tolist()}")
+    print(f"NDCG:      {results['ndcg'].tolist()}")
+
+    results = eval_model.Test_RatingMatrix(U_full_eval_R[:eval_model.n_users,:] @ torch.diag(Eigs_full_eval**2) @ U_full_eval_R[eval_model.n_users:,:].T, eval_model.dataset)
+    print(f"E=U_R Lambda^1.0")
+    print(f"Recall@20: {results['recall'][0]:.6f}")
+    print(f"Precision: {results['precision'].tolist()}")
+    print(f"NDCG:      {results['ndcg'].tolist()}")
 
 finally:
     if world.tensorboard:
