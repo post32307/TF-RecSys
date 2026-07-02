@@ -10,3 +10,10 @@ GF-CF      | amazon-electronics   | (Test) Recall@20: 0.151384, NDCG@20: 0.07842
 PGSP       | amazon-electronics   | (Test) Recall@20: 0.1501, NDCG@20: 0.076                     | 00:02    | k=32, phi=0.25
 TurboCF    | amazon-electronics   | (Test) Recall@20: 0.1413, NDCG@20: 0.0801                    | 00:03    | alpha=0.5, power=1.5, filter=1
 SGFCF      | amazon-electronics   | (Test) Recall@20: 0.1497, NDCG@20: 0.0788                    | 00:03    | k=32, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+
+BSPM       | lastfm               | (Test) Recall@20: 0.286309, NDCG@20: 0.169847                | 00:05    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=128
+EASE       | lastfm               | (Test) Recall@20: 0.2734, NDCG@20: 0.1613                    | 00:02    | lambda_=100
+GF-CF      | lastfm               | (Test) Recall@20: 0.284952, NDCG@20: 0.16976                 | 00:05    | k=128
+PGSP       | lastfm               | (Test) Recall@20: 0.2709, NDCG@20: 0.1603                    | 00:02    | k=128, phi=0.5
+TurboCF    | lastfm               | (Test) Recall@20: 0.2811, NDCG@20: 0.1662                    | 00:05    | alpha=0.7, power=1.0, filter=2
+SGFCF      | lastfm               | (Test) Recall@20: 0.2922, NDCG@20: 0.1741                    | 00:04    | k=128, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
