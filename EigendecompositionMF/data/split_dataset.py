@@ -29,21 +29,20 @@ def read_combined(path: Path) -> dict[int, list[int]]:
 def split_counts(n_items: int, train_ratio: float, val_ratio: float) -> tuple[int, int, int]:
     if n_items <= 0:
         return 0, 0, 0
-    if n_items == 1:
-        return 1, 0, 0
-    if n_items == 2:
-        return 1, 0, 1
 
     test_ratio = 1.0 - train_ratio - val_ratio
-    n_val = max(1, int(round(n_items * val_ratio)))
-    n_test = max(1, int(round(n_items * test_ratio)))
-    if n_val + n_test >= n_items:
-        overflow = n_val + n_test - (n_items - 1)
-        reduce_test = min(overflow, max(0, n_test - 1))
-        n_test -= reduce_test
-        overflow -= reduce_test
-        n_val -= min(overflow, max(0, n_val - 1))
+    eps = 1e-12
+    n_val = max(0, int(n_items * val_ratio + eps))
+    n_test = max(0, int(n_items * test_ratio + eps))
     n_train = n_items - n_val - n_test
+    if n_train < 1:
+        needed = 1 - n_train
+        from_test = min(needed, n_test)
+        n_test -= from_test
+        needed -= from_test
+        if needed:
+            n_val -= min(needed, n_val)
+        n_train = n_items - n_val - n_test
     return n_train, n_val, n_test
 
 

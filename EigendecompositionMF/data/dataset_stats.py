@@ -68,6 +68,17 @@ def stats_for_dataset(dataset_dir: Path, original: bool) -> dict[str, int]:
     }
 
 
+def split_ratio_text(stats: dict[str, int]) -> str:
+    total = stats["total"]
+    if total == 0:
+        return "0.0:0.0:0.0"
+    return (
+        f"{stats['train'] / total:.3f}:"
+        f"{stats['val'] / total:.3f}:"
+        f"{stats['test'] / total:.3f}"
+    )
+
+
 def print_stats(root: Path, original: bool, datasets: list[str] | None) -> None:
     if not root.exists():
         raise FileNotFoundError(f"Dataset root not found: {root}")
@@ -79,21 +90,22 @@ def print_stats(root: Path, original: bool, datasets: list[str] | None) -> None:
     dirs = sorted(dirs, key=lambda path: path.name)
 
     print(f"Dataset root: {root}")
-    print("-" * 112)
+    print("-" * 130)
     print(
         f"{'Dataset':<20} | {'Users':>8} | {'Items':>8} | {'MaxU':>8} | "
-        f"{'MaxI':>8} | {'Train':>10} | {'Val':>10} | {'Test':>10} | {'Total':>10}"
+        f"{'MaxI':>8} | {'Train':>10} | {'Val':>10} | {'Test':>10} | "
+        f"{'Total':>10} | {'Train:Val:Test':>16}"
     )
-    print("-" * 112)
+    print("-" * 130)
     for dataset_dir in dirs:
         stats = stats_for_dataset(dataset_dir, original)
         print(
             f"{dataset_dir.name:<20} | {stats['users']:>8} | {stats['items']:>8} | "
             f"{stats['max_user']:>8} | {stats['max_item']:>8} | "
             f"{stats['train']:>10} | {stats['val']:>10} | "
-            f"{stats['test']:>10} | {stats['total']:>10}"
+            f"{stats['test']:>10} | {stats['total']:>10} | {split_ratio_text(stats):>16}"
         )
-    print("-" * 112)
+    print("-" * 130)
 
 
 def main() -> None:
