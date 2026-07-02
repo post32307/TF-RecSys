@@ -128,7 +128,7 @@ def build_dual_score_fn(X, lambda_, block_size):
 
 data_root = os.environ.get(
     "TFRECSYS_DATA_ROOT",
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", f"00_dataset_seed_{args.seed}")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "split_dataset", f"00_dataset_seed_{args.seed}")),
 )
 data_dir = os.path.abspath(os.path.join(data_root, args.dataset))
 train_file = "train.txt"

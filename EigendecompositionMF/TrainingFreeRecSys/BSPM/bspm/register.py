@@ -8,7 +8,7 @@ from pprint import pprint
 
 DATA_ROOT = Path(os.environ.get(
     "TFRECSYS_DATA_ROOT",
-    Path(__file__).resolve().parents[3] / "data" / f"00_dataset_seed_{world.seed}",
+    Path(__file__).resolve().parents[3] / "data" / "split_dataset" / f"00_dataset_seed_{world.seed}",
 ))
 
 if world.dataset in ['lastfm', 'gowalla', 'yelp2018', 'amazon-book', 'dummy_small', 'dummy_large', 'amazon-CD','amazon-electronics','citeulike','movielens', 'news', 'douban-book','epinions','yelp']:

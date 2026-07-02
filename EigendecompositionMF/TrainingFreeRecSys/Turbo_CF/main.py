@@ -64,7 +64,7 @@ if __name__ == "__main__":
             return rows, cols, data, mu, mi
 
         data_root = data_root_override or os.path.abspath(
-            os.path.join(current_directory, "..", "..", "data", f"00_dataset_seed_{args.seed}")
+            os.path.join(current_directory, "..", "..", "data", "split_dataset", f"00_dataset_seed_{args.seed}")
         )
         data_dir = os.path.abspath(os.path.join(data_root, dataset))
         train_file = "train.txt"

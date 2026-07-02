@@ -29,12 +29,26 @@ signal.signal(signal.SIGTERM, sig_handler)
 
 # Base directory of this script
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+SWEEP_RESULTS_DIR = os.path.join(BASE_DIR, "sweep_results")
+
+def ensure_sweep_results_dir():
+    os.makedirs(SWEEP_RESULTS_DIR, exist_ok=True)
+
+def seed_log_dir(seed):
+    return os.path.join(SWEEP_RESULTS_DIR, f"00_exp_logs_seed_{seed}")
+
+def val_results_file(seed):
+    return os.path.join(SWEEP_RESULTS_DIR, f"00_val_results_seed_{seed}.txt")
+
+def test_results_file(seed):
+    return os.path.join(SWEEP_RESULTS_DIR, f"00_test_results_seed_{seed}.txt")
 
 # Datasets directory (relative to repository root)
 current_dir = Path(__file__).resolve().parent
 DATA_ROOT = current_dir.parent / "data"
 OG_DATA_ROOT = DATA_ROOT / "og_dataset"
 COMBINED_DATA_ROOT = DATA_ROOT / "combined_dataset"
+SPLIT_DATA_ROOT = DATA_ROOT / "split_dataset"
 SPLIT_DATA_ROOT_PREFIX = "00_dataset_seed"
 
 def discover_datasets():
@@ -562,7 +576,7 @@ def parse_params_string(param_str):
     return params
 
 def seed_data_root(seed):
-    return DATA_ROOT / f"{SPLIT_DATA_ROOT_PREFIX}_{seed}"
+    return SPLIT_DATA_ROOT / f"{SPLIT_DATA_ROOT_PREFIX}_{seed}"
 
 def seed_dataset_dir(seed, dataset):
     return seed_data_root(seed) / dataset
@@ -627,7 +641,7 @@ def get_dataset_size_bytes(dataset):
 
     dataset_dir = OG_DATA_ROOT / dataset
     if not dataset_dir.exists():
-        for split_root in sorted(DATA_ROOT.glob(f"{SPLIT_DATA_ROOT_PREFIX}_*")):
+        for split_root in sorted(SPLIT_DATA_ROOT.glob(f"{SPLIT_DATA_ROOT_PREFIX}_*")):
             candidate = split_root / dataset
             if candidate.exists():
                 dataset_dir = candidate
@@ -1039,20 +1053,21 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
         print(f"=== Verification Seed: {seed} ===")
         print(f"==================================================\n")
 
-        log_dir = os.path.join(BASE_DIR, f"00_exp_logs_seed_{seed}")
-        test_results_file = os.path.join(BASE_DIR, f"00_test_results_seed_{seed}.txt")
+        ensure_sweep_results_dir()
+        log_dir = seed_log_dir(seed)
+        test_results_path = test_results_file(seed)
         os.makedirs(log_dir, exist_ok=True)
 
         completed_datasets = set()
         if args.resume_completed:
-            completed_datasets = get_completed_datasets_from_results(test_results_file, models_to_run)
+            completed_datasets = get_completed_datasets_from_results(test_results_path, models_to_run)
             if completed_datasets:
                 skipped = [d for d in datasets_to_run if d in completed_datasets]
                 print(f"Resuming: skipping completed dataset chunks: {skipped}")
 
         remaining_datasets = [d for d in datasets_to_run if d not in completed_datasets]
 
-        with open(test_results_file, 'a') as f:
+        with open(test_results_path, 'a') as f:
             f.write(f"\nVerification Results Summary - {time.ctime()} (Seed: {seed})\n")
             f.write("=" * 100 + "\n")
             f.write("Datasets are written below as complete chunks when all runnable models finish.\n")
@@ -1077,7 +1092,7 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
 
         if not tasks:
             print(f"All requested datasets already have complete chunks for seed {seed}.")
-            with open(test_results_file, 'a') as f:
+            with open(test_results_path, 'a') as f:
                 f.write(f"All requested datasets already complete for seed {seed}.\n")
             continue
 
@@ -1189,7 +1204,7 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
                             dataset_sizes[dataset],
                         )
                         write_dataset_chunk(
-                            test_results_file,
+                            test_results_path,
                             seed,
                             dataset,
                             dataset_results[dataset],
@@ -1204,9 +1219,9 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
         print(
             f"Verification for seed {seed} finished. "
             f"Average active programs: {avg_active:.2f}. "
-            f"Results saved to {test_results_file}"
+            f"Results saved to {test_results_path}"
         )
-        with open(test_results_file, 'a') as f:
+        with open(test_results_path, 'a') as f:
             f.write(f"\nSeed {seed} average active programs: {avg_active:.2f}\n")
 
 def main():
@@ -1242,8 +1257,8 @@ def main():
 
     if missing_seeds:
         print(
-            "Error: The following seed split folders are not found in the data "
-            f"folder: {missing_seeds}. Run data/split_dataset.py for each seed."
+            "Error: The following seed split folders are not found in "
+            f"data/split_dataset: {missing_seeds}. Run data/split_dataset.py for each seed."
         )
         sys.exit(1)
         
@@ -1266,7 +1281,7 @@ def main():
     if missing_dataset_splits:
         print("Error: Missing train.txt/val.txt/test.txt for requested seed datasets:")
         for seed, dataset in missing_dataset_splits:
-            print(f"  {SPLIT_DATA_ROOT_PREFIX}_{seed}/{dataset}")
+            print(f"  split_dataset/{SPLIT_DATA_ROOT_PREFIX}_{seed}/{dataset}")
         print("Run data/split_dataset.py for the missing seed/dataset pairs.")
         sys.exit(1)
     
@@ -1284,9 +1299,10 @@ def main():
         import ast
         
         for seed in args.seeds:
-            results_file = os.path.join(BASE_DIR, f"00_val_results_seed_{seed}.txt")
-            log_dir = os.path.join(BASE_DIR, f"00_exp_logs_seed_{seed}")
-            test_results_file = os.path.join(BASE_DIR, f"00_test_results_seed_{seed}.txt")
+            ensure_sweep_results_dir()
+            results_file = val_results_file(seed)
+            log_dir = seed_log_dir(seed)
+            test_results_path = test_results_file(seed)
             final_eval_env = test_env(seed)
             if not os.path.exists(results_file):
                 print(f"No results file found for seed {seed}")
@@ -1294,7 +1310,7 @@ def main():
 
             started_at = time.time()
             pending_model, pending_dataset, pending_params = first_pending_test(
-                test_results_file,
+                test_results_path,
                 models_to_run,
                 datasets_to_run,
             )
@@ -1306,7 +1322,7 @@ def main():
                 include_params=False,
             )
             normalize_results_file(
-                test_results_file,
+                test_results_path,
                 "Final Test Results Summary",
                 seed,
                 "test_from_results",
@@ -1375,7 +1391,7 @@ def main():
                             detail["duration"],
                             "Test",
                         )
-                        append_result_line(test_results_file, result_line, dataset)
+                        append_result_line(test_results_path, result_line, dataset)
                     else:
                         print(f"  -> No valid validation results found for {model_name} on {dataset}.")
         print(f"Test complete. Results appended to results file.")
@@ -1393,9 +1409,10 @@ def main():
         print(f"=== Processing Seed: {seed} ===")
         print(f"==================================================\n")
         
-        log_dir = os.path.join(BASE_DIR, f"00_exp_logs_seed_{seed}")
-        results_file = os.path.join(BASE_DIR, f"00_val_results_seed_{seed}.txt")
-        test_results_file = os.path.join(BASE_DIR, f"00_test_results_seed_{seed}.txt")
+        ensure_sweep_results_dir()
+        log_dir = seed_log_dir(seed)
+        results_file = val_results_file(seed)
+        test_results_path = test_results_file(seed)
         final_eval_env = test_env(seed)
         os.makedirs(log_dir, exist_ok=True)
 
@@ -1414,7 +1431,7 @@ def main():
             pending_params,
         )
         pending_model, pending_dataset, pending_params = first_pending_test(
-            test_results_file,
+            test_results_path,
             models_to_run,
             datasets_to_run,
         )
@@ -1440,7 +1457,7 @@ def main():
             search_run_history_line,
         )
         normalize_results_file(
-            test_results_file,
+            test_results_path,
             "Final Test Results Summary",
             seed,
             "search-final-test" if args.search else "test",
@@ -1466,7 +1483,7 @@ def main():
                         if search_env is None:
                             print(
                                 f"Error: train.txt/val.txt for {dataset} not found in "
-                                f"{SPLIT_DATA_ROOT_PREFIX}_{seed}. Skipping search for this dataset."
+                                f"split_dataset/{SPLIT_DATA_ROOT_PREFIX}_{seed}. Skipping search for this dataset."
                             )
                             current_search = False
                         else:
@@ -1651,7 +1668,7 @@ def main():
                                 detail["duration"],
                                 "Test",
                             )
-                            append_result_line(test_results_file, result_line, dataset)
+                            append_result_line(test_results_path, result_line, dataset)
                             all_test_results[model_name][dataset] = get_recall_value(metrics_str)
                 finally:
                     pass
@@ -1660,7 +1677,7 @@ def main():
                     print(f"=== [FINAL TEST MODE] Running models on {dataset} with best found parameters ===")
                     for model_name, best_params in best_params_dict.items():
                         if best_params is not None:
-                            if has_test_result(test_results_file, model_name, dataset):
+                            if has_test_result(test_results_path, model_name, dataset):
                                 print(
                                     f"  -> Resume: skipping existing final test for "
                                     f"{model_name} on {dataset}."
@@ -1681,7 +1698,7 @@ def main():
                                 detail["duration"],
                                 "Test",
                             )
-                            append_result_line(test_results_file, result_line, dataset)
+                            append_result_line(test_results_path, result_line, dataset)
                             all_test_results[model_name][dataset] = get_recall_value(metrics_str)
 
                 print("-" * 50)
@@ -1690,7 +1707,7 @@ def main():
             print(f"\n[!] Execution interrupted. Partial results for seed {seed} are saved to {results_file}.")
             sys.exit(1)
 
-        print(f"All experiments for seed {seed} finished. Search results saved to {results_file}, Final Test results saved to {test_results_file}")
+        print(f"All experiments for seed {seed} finished. Search results saved to {results_file}, Final Test results saved to {test_results_path}")
 
 if __name__ == "__main__":
     main()

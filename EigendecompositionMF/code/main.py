@@ -66,7 +66,7 @@ try:
     # ---------------------------------------------------------
     data_root = os.environ.get(
         "TFRECSYS_DATA_ROOT",
-        os.path.join(world.ROOT_PATH, "data", f"00_dataset_seed_{world.seed}"),
+        os.path.join(world.ROOT_PATH, "data", "split_dataset", f"00_dataset_seed_{world.seed}"),
     )
     dataset_name = world.dataset
     dataset_path = os.path.join(data_root, dataset_name)
@@ -88,7 +88,7 @@ try:
     # ---------------------------------------------------------
     # DYNAMIC MULTI-SCALE RESOLUTION LAYOUT GENERATION
     # ---------------------------------------------------------
-    val_true = 2
+    val_true = 1
     #   0: skip parameter search and test with default values
     #   1: search on validation dataset, then test on test dataset
     #   2: search on test dataset, then test on test dataset

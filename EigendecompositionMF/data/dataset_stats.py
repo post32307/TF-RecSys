@@ -8,6 +8,7 @@ from pathlib import Path
 
 
 DATA_DIR = Path(__file__).resolve().parent
+SPLIT_ROOT = DATA_DIR / "split_dataset"
 
 
 def add_standard(path: Path, users: set[int], items: set[int]) -> int:
@@ -111,13 +112,13 @@ def print_stats(root: Path, original: bool, datasets: list[str] | None) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Report dataset statistics.")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--seed", type=int, help="Inspect data/00_dataset_seed_<seed>.")
+    group.add_argument("--seed", type=int, help="Inspect data/split_dataset/00_dataset_seed_<seed>.")
     group.add_argument("--root", type=Path, help="Inspect an explicit dataset root.")
     parser.add_argument("--datasets", nargs="+", help="Optional dataset names to report.")
     args = parser.parse_args()
 
     if args.seed is not None:
-        root = DATA_DIR / f"00_dataset_seed_{args.seed}"
+        root = SPLIT_ROOT / f"00_dataset_seed_{args.seed}"
         original = False
     else:
         root = args.root if args.root else DATA_DIR / "og_dataset"

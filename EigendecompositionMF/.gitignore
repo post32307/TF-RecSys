@@ -17,11 +17,7 @@ __pycache__/
 
 **/data/combined_dataset/**
 **/data/og_dataset/**
-**/data/00_dataset_seed_42/**
-**/data/00_dataset_seed_47/**
-**/data/00_dataset_seed_2020/**
-**/data/00_dataset_seed_2026/**
-**/data/00_dataset_seed_2050/**
+**/data/split_dataset/**
 **/code/Figures/**
 **/code/logs/**
 **/code/Results/**

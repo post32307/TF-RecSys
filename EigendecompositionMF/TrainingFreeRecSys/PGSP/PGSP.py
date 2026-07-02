@@ -31,7 +31,7 @@ P0_NORM = not args.no_p0_norm
 P1_NORM = not args.no_p1_norm
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_ROOT = Path(os.environ.get("TFRECSYS_DATA_ROOT", BASE_DIR.parent.parent / "data" / f"00_dataset_seed_{args.seed}"))
+DATA_ROOT = Path(os.environ.get("TFRECSYS_DATA_ROOT", BASE_DIR.parent.parent / "data" / "split_dataset" / f"00_dataset_seed_{args.seed}"))
 data_dir = DATA_ROOT / args.dataset
 train_file = data_dir / "train.txt"
 test_file = data_dir / os.environ.get("TFRECSYS_EVAL_FILE", "test.txt")

@@ -1,0 +1,12 @@
+Final Test Results Summary (Seed: 2020)
+Run started:
+Thu Jul  2 09:49:23 2026 : BSPM / amazon-electronics
+========================================================================================================================
+Model      | Dataset              | Metrics                                                      | Time     | Parameters
+------------------------------------------------------------------------------------------------------------------------
+BSPM       | amazon-electronics   | (Test) Recall@20: 0.147247, NDCG@20: 0.0778703               | 00:05    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=32
+EASE       | amazon-electronics   | (Test) Recall@20: 0.1317, NDCG@20: 0.0739                    | 00:01    | lambda_=200
+GF-CF      | amazon-electronics   | (Test) Recall@20: 0.151384, NDCG@20: 0.078426                | 00:05    | k=32
+PGSP       | amazon-electronics   | (Test) Recall@20: 0.1501, NDCG@20: 0.076                     | 00:02    | k=32, phi=0.25
+TurboCF    | amazon-electronics   | (Test) Recall@20: 0.1413, NDCG@20: 0.0801                    | 00:03    | alpha=0.5, power=1.5, filter=1
+SGFCF      | amazon-electronics   | (Test) Recall@20: 0.1497, NDCG@20: 0.0788                    | 00:03    | k=32, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5

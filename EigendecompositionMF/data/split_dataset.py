@@ -10,6 +10,7 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent
 COMBINED_DIR = DATA_DIR / "combined_dataset"
+SPLIT_ROOT = DATA_DIR / "split_dataset"
 
 
 def read_combined(path: Path) -> dict[int, list[int]]:
@@ -108,7 +109,7 @@ def main() -> None:
     if selected:
         files = [path for path in files if path.name.removesuffix("_combined.txt") in selected]
 
-    output_root = DATA_DIR / f"00_dataset_seed_{args.seed}"
+    output_root = SPLIT_ROOT / f"00_dataset_seed_{args.seed}"
     output_root.mkdir(parents=True, exist_ok=True)
 
     for combined_file in files:

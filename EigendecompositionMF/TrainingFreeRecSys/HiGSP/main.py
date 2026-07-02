@@ -26,7 +26,7 @@ def main():
     np.random.seed(args.seed)
     os.environ.setdefault(
         "TFRECSYS_DATA_ROOT",
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", f"00_dataset_seed_{args.seed}")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "split_dataset", f"00_dataset_seed_{args.seed}")),
     )
 
     dataloader = Dataset(args.dataset)
