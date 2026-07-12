@@ -1,0 +1,6 @@
+results/
+code/checkpoints/
+code/runs/
+code/__pycache__/
+*.pyc
+*.so
