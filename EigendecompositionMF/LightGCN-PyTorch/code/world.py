@@ -16,9 +16,9 @@ import multiprocessing
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 args = parse_args()
 
-ROOT_PATH = os.path.dirname(os.path.dirname(__file__))
+ROOT_PATH = os.path.normpath(join(os.path.dirname(os.path.abspath(__file__)), '..'))
 CODE_PATH = join(ROOT_PATH, 'code')
-DATA_PATH = '/home/irteam/TF-RecSys/EigendecompositionMF/data/split_dataset'
+DATA_PATH = os.path.normpath(join(ROOT_PATH, '..', 'data', 'split_dataset'))
 BOARD_PATH = join(CODE_PATH, 'runs')
 FILE_PATH = join(CODE_PATH, 'checkpoints')
 import sys

@@ -166,6 +166,10 @@ def format_results(results):
     )
 
 
+def format_output_path(path):
+    return os.path.relpath(path, world.ROOT_PATH)
+
+
 def results_path():
     return join(world.ROOT_PATH, "results", "main_out.txt")
 
@@ -314,7 +318,7 @@ def append_result(mode, params, results, epochs, runtime, split_path):
         f"parameters=(recdim={params[0]}, lr={params[1]}, decay={params[2]}, layer={params[3]}, "
         f"bpr_batch={world.config['bpr_batch_size']}, topks={world.topks}) | "
         f"runtime={runtime:.2f}s | "
-        f"split_path={split_path}\n"
+        f"split_path={format_output_path(split_path)}\n"
     )
     child_result_file = world.args.child_result_file
     if child_result_file:
@@ -419,7 +423,7 @@ def add_arg(cmd, name, value):
 
 
 def child_command(dataset, seed, result_file):
-    cmd = [sys.executable, os.path.abspath(__file__)]
+    cmd = [sys.executable, "main.py"]
     args = world.args
     for name in (
         "bpr_batch", "recdim", "layer", "lr", "decay", "dropout", "keepprob",
@@ -559,8 +563,8 @@ def run_scheduler():
                 task = run["task"]
                 error_line = (
                     f"(error) | {task['dataset']:<{DATASET_COL_WIDTH}} | seed={task['seed']} | "
-                    f"runtime={run['runtime']:.2f}s | split_path={task['split_path']} | "
-                    f"log={run['log_file']}\n"
+                    f"runtime={run['runtime']:.2f}s | split_path={format_output_path(task['split_path'])} | "
+                    f"log={format_output_path(run['log_file'])}\n"
                 )
             append_ordered_child_results(
                 run["result_file"],
