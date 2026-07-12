@@ -276,6 +276,8 @@ try:
         "eps": default_sgfcf_params["eps"],
         "gamma": default_sgfcf_params["gamma"],
     }
+    default_quantized_sgfcf_params = dict(default_sgfcf_params)
+    beta_quantization_step = 0.5
     tau_space = [0.2, 0.4, 0.6, 0.8]
     delta_space = [0.0, 0.1, 0.2, 0.3]
     individual_filter_space = [
@@ -443,6 +445,18 @@ try:
             homo_weight = homo_weight + (x_max * y_min - y_max * x_min) / (x_max - x_min)
         return eig_values.unsqueeze(0).pow(homo_weight.unsqueeze(1))
 
+    def quantized_individual_weight(eig_values, homo_ratio, beta_1, beta_2):
+        eig_values = torch.clamp(eig_values, min=1e-12)
+        y_min, y_max = beta_1, beta_2
+        x_min, x_max = homo_ratio.min(), homo_ratio.max()
+        if torch.isclose(x_min, x_max).item():
+            homo_weight = torch.ones_like(homo_ratio) * y_min
+        else:
+            homo_weight = (y_max - y_min) / (x_max - x_min) * homo_ratio
+            homo_weight = homo_weight + (x_max * y_min - y_max * x_min) / (x_max - x_min)
+        homo_weight = torch.round(homo_weight / beta_quantization_step) * beta_quantization_step
+        return eig_values.unsqueeze(0).pow(homo_weight.unsqueeze(1))
+
     def threshold_offdiag_graph(mat):
         graph = mat.tocsr(copy=True)
         graph.setdiag(0)
@@ -595,6 +609,19 @@ try:
         item_factors = V[:, :current_k] * item_filter
         return user_factors, item_factors, norm_freq_csr, norm_freq_csc
 
+    def build_quantized_sgfcf_factors(current_model, params, homo_user, homo_item, sgfcf_component_cache):
+        U, value, V, norm_freq_csr, norm_freq_csc, current_k = compute_sgfcf_components(
+            current_model,
+            params,
+            sgfcf_component_cache,
+        )
+        value_slice = value[:current_k]
+        user_filter = quantized_individual_weight(value_slice, homo_user, params["beta_1"], params["beta_2"])
+        item_filter = quantized_individual_weight(value_slice, homo_item, params["beta_1"], params["beta_2"])
+        user_factors = U[:, :current_k] * user_filter
+        item_factors = V[:, :current_k] * item_filter
+        return user_factors, item_factors, norm_freq_csr, norm_freq_csc
+
     def build_nonhomophily_sgfcf_factors(current_model, params, sgfcf_component_cache):
         U, value, V, norm_freq_csr, norm_freq_csc, current_k = compute_sgfcf_components(
             current_model,
@@ -681,6 +708,26 @@ try:
 
     def evaluate_sgfcf_model(current_model, current_dataset, params, homo_user, homo_item, sgfcf_component_cache, eval_batches=None, user_count=None):
         user_factors, item_factors, norm_freq_csr, norm_freq_csc = build_sgfcf_factors(
+            current_model,
+            params,
+            homo_user,
+            homo_item,
+            sgfcf_component_cache,
+        )
+        return test_sgfcf_rating(
+            current_model,
+            current_dataset,
+            user_factors,
+            item_factors,
+            norm_freq_csr,
+            norm_freq_csc,
+            params["gamma"],
+            eval_batches,
+            user_count,
+        )
+
+    def evaluate_quantized_sgfcf_model(current_model, current_dataset, params, homo_user, homo_item, sgfcf_component_cache, eval_batches=None, user_count=None):
+        user_factors, item_factors, norm_freq_csr, norm_freq_csc = build_quantized_sgfcf_factors(
             current_model,
             params,
             homo_user,
@@ -796,7 +843,7 @@ try:
 
         return best_params, best_results, best_score
 
-    def run_final_tests(test_dataset, individual_params, sgfcf_params, nonhomophily_sgfcf_params):
+    def run_final_tests(test_dataset, individual_params, sgfcf_params, quantized_sgfcf_params, nonhomophily_sgfcf_params):
         test_model = model.PSEmodel(world.config, test_dataset)
         homo_user, homo_item = compute_homophily_ratios(test_model)
         component_cache = {}
@@ -817,13 +864,21 @@ try:
             homo_item,
             sgfcf_component_cache,
         )
+        quantized_sgfcf_results = evaluate_quantized_sgfcf_model(
+            test_model,
+            test_dataset,
+            quantized_sgfcf_params,
+            homo_user,
+            homo_item,
+            sgfcf_component_cache,
+        )
         nonhomophily_sgfcf_results = evaluate_nonhomophily_sgfcf_model(
             test_model,
             test_dataset,
             nonhomophily_sgfcf_params,
             sgfcf_component_cache,
         )
-        return individual_results, sgfcf_results, nonhomophily_sgfcf_results, test_model
+        return individual_results, sgfcf_results, quantized_sgfcf_results, nonhomophily_sgfcf_results, test_model
 
     def run_baseline_tests(test_model, test_dataset, k):
         baseline_alpha = fixed_asym_alpha
@@ -910,9 +965,12 @@ try:
         fprint(f"val_true: {val_true}")
         fprint(f"Default individual-filter params: {default_params}")
         fprint(f"Default SGFCF params: {default_sgfcf_params}")
+        fprint(f"Default quantized_SGFCF params: {default_quantized_sgfcf_params}")
+        fprint(f"quantized_SGFCF beta grid step: {beta_quantization_step}")
         fprint(f"Default nonhomophily_SGFCF params: {default_nonhomophily_sgfcf_params}")
 
         best_sgfcf_params = dict(default_sgfcf_params)
+        best_quantized_sgfcf_params = dict(default_quantized_sgfcf_params)
         if val_true == 0:
             best_params = dict(default_params)
             best_nonhomophily_sgfcf_params = dict(default_nonhomophily_sgfcf_params)
@@ -957,10 +1015,11 @@ try:
         test_dataset = load_dataset("test.txt")
         fprint()
         fprint("Final Test")
-        final_test_results, final_sgfcf_test_results, final_nonhomophily_sgfcf_test_results, final_test_model = run_final_tests(
+        final_test_results, final_sgfcf_test_results, final_quantized_sgfcf_test_results, final_nonhomophily_sgfcf_test_results, final_test_model = run_final_tests(
             test_dataset,
             best_params,
             best_sgfcf_params,
+            best_quantized_sgfcf_params,
             best_nonhomophily_sgfcf_params,
         )
         fprint(f"Final individual-filter params: {best_params}")
@@ -968,6 +1027,10 @@ try:
         fprint()
         fprint(f"Final SGFCF params: {best_sgfcf_params}")
         print_metrics("SGFCF Test", final_sgfcf_test_results)
+        fprint()
+        fprint(f"Final quantized_SGFCF params: {best_quantized_sgfcf_params}")
+        fprint(f"quantized_SGFCF score: homophily-derived beta rounded to nearest {beta_quantization_step}")
+        print_metrics("quantized_SGFCF Test", final_quantized_sgfcf_test_results)
         fprint()
         fprint(f"Final nonhomophily_SGFCF params: {best_nonhomophily_sgfcf_params}")
         fprint("nonhomophily_SGFCF score: global beta filter without homophily ratios")
