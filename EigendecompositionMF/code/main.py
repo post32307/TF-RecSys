@@ -17,7 +17,7 @@ print(">>SEED:", world.seed)
 # ==============================
 import dataloader
 
-from tqdm import tqdm  # Standard progress bar library
+from tqdm import tqdm
 
 sources_path = os.path.join(os.path.dirname(__file__), "sources")
 if sources_path not in sys.path:
@@ -45,15 +45,14 @@ except ImportError:
         sample_ext = False
 
 
-
 import model
 Neg_k = 1
 
 # init tensorboard
 if world.tensorboard:
-    w : SummaryWriter = SummaryWriter(
-                                    join(world.BOARD_PATH, time.strftime("%m-%d-%Hh%Mm%Ss-") + "-" + world.comment)
-                                    )
+    w: SummaryWriter = SummaryWriter(
+        join(world.BOARD_PATH, time.strftime("%m-%d-%Hh%Mm%Ss-") + "-" + world.comment)
+    )
 else:
     w = None
     world.cprint("not enable tensorflowboard")
@@ -61,8 +60,170 @@ else:
 try:
     import scipy.sparse as sp
     import itertools
+    from scipy.sparse.linalg import eigs
+    from scipy.sparse.linalg import svds
+
+    plot_true = 0
+    #   0: skip eigenvalue plotting and continue to the model/search code
+    #   1: plot real eigenvalues, save to plots/, and terminate with sys.exit()
+    if plot_true not in (0, 1):
+        raise ValueError("plot_true must be 0 or 1.")
+
+    if plot_true == 1:
+        # ---------------------------------------------------------
+        # Temporary diagnostic: plot asymmetric-normalized eigenvalues
+        # ---------------------------------------------------------
+        plot_data_root = os.environ.get(
+            "TFRECSYS_DATA_ROOT",
+            os.path.join(world.ROOT_PATH, "data", "split_dataset", f"00_dataset_seed_{world.seed}"),
+        )
+        plot_dataset_name = world.dataset
+        plot_dataset_path = os.path.join(plot_data_root, plot_dataset_name)
+        if not os.path.isdir(plot_dataset_path):
+            raise FileNotFoundError(f"Dataset directory not found: {plot_dataset_path}")
+
+        def plot_tau_delta_to_alpha_beta(tau, delta):
+            norm_alpha = tau / 2.0 - delta
+            norm_beta = tau / 2.0 + delta
+            if norm_alpha <= 1e-12 or norm_beta <= 1e-12:
+                raise ValueError
+            return norm_alpha, norm_beta
+
+        plot_tau_space = [0.2, 0.4, 0.6, 0.8]
+        plot_delta_space = [0.0, 0.1, 0.2, 0.3]
+        plot_pairs = []
+        for plot_tau, plot_delta in itertools.product(plot_tau_space, plot_delta_space):
+            try:
+                plot_alpha, plot_beta = plot_tau_delta_to_alpha_beta(plot_tau, plot_delta)
+            except ValueError:
+                continue
+            plot_pairs.append((plot_tau, plot_delta, plot_alpha, plot_beta))
+
+        plot_dataset = dataloader.Loader(path=plot_dataset_path)
+        plot_model = model.PSEmodel(world.config, plot_dataset)
+        plot_k = max(1, min(int(world.config["k"]), plot_model.n_users + plot_model.m_items - 2))
+        plot_rowsum = np.array(plot_model.A.sum(axis=1)).flatten()
+        plot_rowsum[plot_rowsum == 0] = 1e-9
+        plot_model.D_inv = sp.diags(1.0 / plot_rowsum)
+
+        plot_asym_eigenvalues = []
+        for plot_tau, plot_delta, plot_alpha, plot_beta in tqdm(
+            plot_pairs,
+            desc="Plotting asym eigenvalues",
+            unit="cfg",
+        ):
+            plot_x_norm = plot_model.getNormAdj(
+                plot_model.A,
+                plot_model.D_inv,
+                alpha1=plot_alpha,
+                alpha2=plot_beta,
+            )
+            plot_eigs = eigs(plot_x_norm, k=plot_k, which="LR", return_eigenvectors=False)
+            plot_asym_eigenvalues.append((plot_tau, plot_delta, plot_alpha, plot_beta, plot_eigs))
+
+        plot_sgfcf_param_pairs = [
+            (0.0, 0.5),
+            (0.0, 0.28),
+            (0.0, 0.37),
+            (0.0, 0.34),
+            (2.3, 0.5),
+            (4.8, 0.5),
+            (5.3, 0.5),
+            (19.0, 0.5),
+        ]
+        plot_r = plot_model.R.astype(np.float32).tocsr()
+        plot_user_degree = np.array(plot_r.sum(axis=1)).flatten()
+        plot_item_degree = np.array(plot_r.sum(axis=0)).flatten()
+        plot_sgfcf_eigenvalues = []
+        for plot_sgfcf_alpha, plot_sgfcf_eps in tqdm(
+            plot_sgfcf_param_pairs,
+            desc="Plotting SGFCF eigenvalues",
+            unit="cfg",
+        ):
+            with np.errstate(divide="ignore"):
+                plot_d_u = 1.0 / np.power(plot_user_degree + plot_sgfcf_alpha, plot_sgfcf_eps)
+                plot_d_i = 1.0 / np.power(plot_item_degree + plot_sgfcf_alpha, plot_sgfcf_eps)
+            plot_d_u[np.isinf(plot_d_u)] = 0.0
+            plot_d_i[np.isinf(plot_d_i)] = 0.0
+            plot_r_tilde = sp.diags(plot_d_u).dot(plot_r).dot(sp.diags(plot_d_i)).tocsr()
+            plot_sgfcf_adj = sp.bmat([[None, plot_r_tilde], [plot_r_tilde.T, None]], format="csr")
+            plot_sgfcf_eigs = eigs(plot_sgfcf_adj, k=plot_k, which="LR", return_eigenvectors=False)
+            plot_sgfcf_eigenvalues.append((plot_sgfcf_alpha, plot_sgfcf_eps, plot_sgfcf_eigs))
+
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        plot_dir = os.path.join(os.path.dirname(__file__), "plots")
+        os.makedirs(plot_dir, exist_ok=True)
+        plot_file = os.path.join(
+            plot_dir,
+            f"{plot_dataset_name}_eignevalues_seed_{world.seed}_k_{plot_k}.png",
+        )
+
+        def normalized_spectrum(vals):
+            vals = np.sort(np.abs(vals))[::-1]
+            if len(vals) == 0 or vals[0] == 0:
+                return vals
+            return vals / vals[0]
+
+        def energy_curve(vals):
+            vals = np.sort(np.abs(vals))[::-1]
+            energy = vals ** 2
+            total_energy = np.sum(energy)
+            if total_energy == 0:
+                return np.zeros_like(energy)
+            return np.cumsum(energy) / total_energy
+
+        fig, axes = plt.subplots(2, 3, figsize=(21, 12))
+        for plot_tau, plot_delta, plot_alpha, plot_beta, plot_eigs in plot_asym_eigenvalues:
+            plot_label = (
+                f"tau={plot_tau}, delta={plot_delta} "
+                f"(a={plot_alpha:.2f}, b={plot_beta:.2f})"
+            )
+            sorted_real = np.sort(plot_eigs.real)[::-1]
+            norm_vals = normalized_spectrum(plot_eigs)
+            energy_vals = energy_curve(plot_eigs)
+            axes[0, 0].plot(np.arange(1, len(sorted_real) + 1), sorted_real, marker=".", linewidth=1, label=plot_label)
+            axes[0, 1].plot(np.arange(1, len(norm_vals) + 1), norm_vals, marker=".", linewidth=1, label=plot_label)
+            axes[0, 2].plot(np.arange(1, len(energy_vals) + 1), energy_vals, marker=".", linewidth=1, label=plot_label)
+
+        for plot_sgfcf_alpha, plot_sgfcf_eps, plot_eigs in plot_sgfcf_eigenvalues:
+            plot_label = f"alpha={plot_sgfcf_alpha}, eps={plot_sgfcf_eps}"
+            sorted_real = np.sort(plot_eigs.real)[::-1]
+            norm_vals = normalized_spectrum(plot_eigs)
+            energy_vals = energy_curve(plot_eigs)
+            axes[1, 0].plot(np.arange(1, len(sorted_real) + 1), sorted_real, marker=".", linewidth=1, label=plot_label)
+            axes[1, 1].plot(np.arange(1, len(norm_vals) + 1), norm_vals, marker=".", linewidth=1, label=plot_label)
+            axes[1, 2].plot(np.arange(1, len(energy_vals) + 1), energy_vals, marker=".", linewidth=1, label=plot_label)
+
+        axes[0, 0].set_title("Asymmetric Normalization: Real Eigenvalues")
+        axes[0, 1].set_title("Asymmetric Normalization: Normalized Spectrum")
+        axes[0, 2].set_title("Asymmetric Normalization: Energy Curve")
+        axes[1, 0].set_title("SGFCF-Style Normalization: Real Eigenvalues")
+        axes[1, 1].set_title("SGFCF-Style Normalization: Normalized Spectrum")
+        axes[1, 2].set_title("SGFCF-Style Normalization: Energy Curve")
+        for plot_ax in axes.flat:
+            plot_ax.set_xlabel("Rank")
+            plot_ax.grid(True, alpha=0.25)
+            plot_ax.legend(fontsize=6, loc="best")
+        axes[0, 0].set_ylabel("Eigenvalue Real Part")
+        axes[0, 1].set_ylabel("lambda_i / lambda_1")
+        axes[0, 2].set_ylabel("Cumulative Energy")
+        axes[1, 0].set_ylabel("Eigenvalue Real Part")
+        axes[1, 1].set_ylabel("lambda_i / lambda_1")
+        axes[1, 2].set_ylabel("Cumulative Energy")
+        fig.suptitle(f"{plot_dataset_name} eigenvalue spectra, seed={world.seed}, k={plot_k}")
+        fig.tight_layout()
+        fig.savefig(plot_file, dpi=200)
+        plt.close(fig)
+        print(f"Saved eigenvalue real-part plots to {plot_file}")
+        sys.exit()
+
+
+
     # ---------------------------------------------------------
-    # 1. Define Paths & Load Target Main Datasets
+    # 1. Seeded dataset paths and run controls
     # ---------------------------------------------------------
     data_root = os.environ.get(
         "TFRECSYS_DATA_ROOT",
@@ -70,96 +231,110 @@ try:
     )
     dataset_name = world.dataset
     dataset_path = os.path.join(data_root, dataset_name)
-    split_dir = dataset_path
 
     if not os.path.isdir(dataset_path):
         raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
-    world.cprint(f"Loading Full Evaluation Dataset: {dataset_name}")
-    previous_eval_file = os.environ.get("TFRECSYS_EVAL_FILE")
-    os.environ["TFRECSYS_EVAL_FILE"] = "test.txt"
-    try:
-        test_dataset = dataloader.Loader(path=dataset_path)
-    finally:
-        if previous_eval_file is None:
-            os.environ.pop("TFRECSYS_EVAL_FILE", None)
-        else:
-            os.environ["TFRECSYS_EVAL_FILE"] = previous_eval_file
 
-    # ---------------------------------------------------------
-    # DYNAMIC MULTI-SCALE RESOLUTION LAYOUT GENERATION
-    # ---------------------------------------------------------
-    val_true = 1
-    #   0: skip parameter search and test with default values
-    #   1: search on validation dataset, then test on test dataset
-    #   2: search on test dataset, then test on test dataset
-    max_k = world.config['k']  # e.g., 128
-    k_interval = 64
-    n = 1
-    b = 8
-    if b < 1:
-        raise ValueError("b must be at least 1.")
+    val_true = 2
+    #   0: no hyperparameter search; test default params on test.txt
+    #   1: train on train.txt, search on val.txt, test on test.txt
+    #   2: train on train.txt, search on test.txt, test on test.txt
     if val_true not in (0, 1, 2):
         raise ValueError("val_true must be 0, 1, or 2.")
-    if val_true == 1 and not os.path.isfile(os.path.join(split_dir, "val.txt")):
-        raise FileNotFoundError(f"Validation file not found: {os.path.join(split_dir, 'val.txt')}")
-    print(f"n : {n} / b : {b} / val_true : {val_true}")
-    
-    default_tau = 0.6
-    default_eps1 = 0.0
-    default_eps2 = 0.0
-    default_delta = 0.1
-    default_beta = [1.0 for _ in range(b)]
-    # Example for setting interval-specific default betas:
-    # default_beta[0]=-0.5
-    # default_beta[1]=-0.5
-    # default_beta[2]=-0.5
-    # default_beta[3]=-0.5
-    # default_beta[4]=0.5
-    # default_beta[5]=1
-    if len(default_beta) != b:
-        raise ValueError("default_beta must have exactly b values.")
-    if any(default_beta[idx] > default_beta[idx + 1] for idx in range(b - 1)):
-        raise ValueError("default_beta values must be nondecreasing across intervals.")
+    if val_true == 1 and not os.path.isfile(os.path.join(dataset_path, "val.txt")):
+        raise FileNotFoundError(f"Validation file not found: {os.path.join(dataset_path, 'val.txt')}")
 
-    k_dimensions = []
-    current_dim = max_k
-    current_n = n
-    while current_dim >= 32 and current_n > 0:
-        k_dimensions.append(current_dim)
-        current_dim -= k_interval
-        current_n -= 1
-        
-    num_scales = len(k_dimensions)
-    world.cprint(f"Dynamic Scale Subspaces Enabled: {k_dimensions} (N={num_scales} distinct delta steps)")
+    max_k = world.config["k"]
+    default_params = {
+        "tau": 0.6,
+        "delta": 0.1,
+        "beta_1": 1.0,
+        "beta_2": 1.0,
+        "k": max_k,
+    }
+    sgfcf_seed_2020_defaults = {
+        "amazon-electronics": {"k": 32, "beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
+        "lastfm": {"k": 128, "beta_1": 0.7, "beta_2": 1.1, "alpha": 0.0, "eps": 0.28, "gamma": 1.5},
+        "citeulike": {"k": 1024, "beta_1": 0.7, "beta_2": 1.1, "alpha": 0.0, "eps": 0.28, "gamma": 1.5},
+        "epinions": {"k": 128, "beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
+        "yelp": {"k": 128, "beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
+        "douban-book": {"k": 1024, "beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
+        "amazon-CD": {"k": 512, "beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
+        "news": {"k": 64, "beta_1": 0.9, "beta_2": 1.0, "alpha": 0.0, "eps": 0.37, "gamma": 0.3},
+        "movielens": {"k": 128, "beta_1": 0.9, "beta_2": 1.0, "alpha": 0.0, "eps": 0.37, "gamma": 0.3},
+        "gowalla": {"k": 1024, "beta_1": 0.7, "beta_2": 1.1, "alpha": 0.0, "eps": 0.28, "gamma": 1.5},
+        "yelp2018": {"k": 512, "beta_1": 0.9, "beta_2": 1.0, "alpha": 0.0, "eps": 0.37, "gamma": 0.3},
+    }
+    default_sgfcf_params = dict(sgfcf_seed_2020_defaults.get(
+        dataset_name,
+        {"k": max_k, "beta_1": 0.7, "beta_2": 1.1, "alpha": 0.0, "eps": 0.28, "gamma": 1.5},
+    ))
+    default_nonhomophily_sgfcf_params = {
+        "k": default_sgfcf_params["k"],
+        "beta": 1.0,
+        "alpha": default_sgfcf_params["alpha"],
+        "eps": default_sgfcf_params["eps"],
+        "gamma": default_sgfcf_params["gamma"],
+    }
+    tau_space = [0.2, 0.4, 0.6, 0.8]
+    delta_space = [0.0, 0.1, 0.2, 0.3]
+    individual_filter_space = [
+        (1.0, 1.0),
+        (0.7, 1.1),
+        (0.9, 1.0),
+        (1.0, 1.3),
+        (0.3, 2.5),
+        (2.0, 2.4),
+        (4.3, 5.1),
+        (2.5, 6.5),
+    ]
+    nonhomophily_sgfcf_beta_space = [0.0, 0.5, 1.0, 1.5, 2.0]
 
-    # ---------------------------------------------------------
-    # 2. Multi-Scale Search Loop with Sliced Subspaces & Separate Deltas
-    # ---------------------------------------------------------
-    eps_space = [0.0] # [0.0, 0.1, 0.3] # [0.0, 0.1, 0.3, 0.5] # Space for epsilon_1, epsilon_2
-    alpha_space_1 = [0.6] # [0.4, 0.6, 0.8]  # Space for tau
-    alpha_space_2 = [0.1] # [0.1, 0.2, 0.3]  # Space for delta
-    beta_space = [-1.0, -0.5, 0.0, 0.5, 1.0] # [-1.0, -0.5, 0.0, 0.5, 1.0] # Space for betas (ustom structural eigenvalue exponent filter space)
-    #     tau and delta control the degrees in asymmetric normalization
-    #     epsilon controls the smoothness of degree operations
-    #     beta controls the eigenvalues
-    
-    best_recall = -1.0
-    # Store dynamic keys dynamically based on scale size index
-    best_params = {"tau": default_tau, "eps1": default_eps1, "eps2": default_eps2}
-    for idx in range(num_scales):
-        best_params[f"delta{idx+1}"] = default_delta
-        best_params[f"mask{idx+1}"] = 1
-        for interval_idx in range(b):
-            best_params[f"beta{idx+1}_{interval_idx+1}"] = default_beta[interval_idx]
-    best_val_results = None
+    fixed_asym_alpha = 0.2
+    fixed_asym_beta = 0.4
 
-    def signed_eigen_power(eigs, powers):
-        return torch.sign(eigs) * torch.pow(torch.abs(eigs), powers)
+    def alpha_beta_to_tau_delta(norm_alpha, norm_beta):
+        return norm_alpha + norm_beta, (norm_beta - norm_alpha) / 2.0
+
+    def tau_delta_to_alpha_beta(tau, delta):
+        norm_alpha = tau / 2.0 - delta
+        norm_beta = tau / 2.0 + delta
+        min_norm_power = 1e-12
+        if norm_alpha <= min_norm_power or norm_beta <= min_norm_power:
+            raise ValueError(
+                f"Skipped tau/delta pair: tau={tau}, delta={delta} gives "
+                f"alpha={norm_alpha}, beta={norm_beta}."
+            )
+        return norm_alpha, norm_beta
+
+    def is_valid_tau_delta(tau, delta):
+        try:
+            tau_delta_to_alpha_beta(tau, delta)
+            return True
+        except ValueError:
+            return False
+
+    tau_delta_to_alpha_beta(default_params["tau"], default_params["delta"])
+
+    def load_dataset(eval_file):
+        previous_eval_file = os.environ.get("TFRECSYS_EVAL_FILE")
+        os.environ["TFRECSYS_EVAL_FILE"] = eval_file
+        try:
+            return dataloader.Loader(path=dataset_path)
+        finally:
+            if previous_eval_file is None:
+                os.environ.pop("TFRECSYS_EVAL_FILE", None)
+            else:
+                os.environ["TFRECSYS_EVAL_FILE"] = previous_eval_file
+
+    def fprint(*args, **kwargs):
+        print(*args, **kwargs)
+        print(*args, **kwargs, file=out_file)
 
     def prepare_eval_batches(current_dataset):
-        u_batch_size = world.config['test_u_batch_size']
-        testDict = current_dataset.testDict
-        users = list(testDict.keys())
+        u_batch_size = world.config["test_u_batch_size"]
+        test_dict = current_dataset.testDict
+        users = list(test_dict.keys())
         if len(users) == 0:
             return [], 0
 
@@ -169,17 +344,17 @@ try:
             eval_batches.append((
                 batch_users,
                 current_dataset.getUserPosItems(batch_users),
-                [testDict[u] for u in batch_users],
-                torch.Tensor(batch_users).long().to(world.device)
+                [test_dict[u] for u in batch_users],
+                torch.Tensor(batch_users).long().to(world.device),
             ))
         return eval_batches, len(users)
 
     def test_factorized_rating(current_model, current_dataset, user_factors, item_factors, eval_batches=None, user_count=None):
-        max_K = max(world.topks)
+        max_k_eval = max(world.topks)
         results = {
-            'precision': np.zeros(len(world.topks)),
-            'recall': np.zeros(len(world.topks)),
-            'ndcg': np.zeros(len(world.topks))
+            "precision": np.zeros(len(world.topks)),
+            "recall": np.zeros(len(world.topks)),
+            "ndcg": np.zeros(len(world.topks)),
         }
         if eval_batches is None or user_count is None:
             eval_batches, user_count = prepare_eval_batches(current_dataset)
@@ -187,267 +362,627 @@ try:
             return results
 
         with torch.no_grad():
-            for batch_users, allPos, groundTrue, batch_users_gpu in eval_batches:
+            for batch_users, all_pos, ground_true, batch_users_gpu in eval_batches:
                 rating = user_factors[batch_users_gpu, :] @ item_factors.t()
 
                 exclude_index = []
                 exclude_items = []
-                for range_i, items_pos in enumerate(allPos):
+                for range_i, items_pos in enumerate(all_pos):
                     exclude_index.extend([range_i] * len(items_pos))
                     exclude_items.extend(items_pos)
-                rating[exclude_index, exclude_items] = -(1 << 10)
+                if exclude_index:
+                    rating[exclude_index, exclude_items] = -(1 << 10)
 
-                _, rating_K = torch.topk(rating, k=max_K)
-                batch_result = current_model.test_one_batch((rating_K.cpu(), groundTrue))
-                results['recall'] += batch_result['recall']
-                results['precision'] += batch_result['precision']
-                results['ndcg'] += batch_result['ndcg']
-                del rating, rating_K
+                _, rating_k = torch.topk(rating, k=max_k_eval)
+                batch_result = current_model.test_one_batch((rating_k.cpu(), ground_true))
+                results["recall"] += batch_result["recall"]
+                results["precision"] += batch_result["precision"]
+                results["ndcg"] += batch_result["ndcg"]
+                del rating, rating_k
 
-        results['recall'] /= float(user_count)
-        results['precision'] /= float(user_count)
-        results['ndcg'] /= float(user_count)
+        results["recall"] /= float(user_count)
+        results["precision"] /= float(user_count)
+        results["ndcg"] /= float(user_count)
         return results
 
-    if val_true == 0:
-        world.cprint("Skipping validation search and using default hyperparameters.")
-    else:
-        validation_start_time = time.time()
-        val_dataset = None
-        if val_true == 1:
-            world.cprint(f"Using Validation File for Parameter Search: {dataset_name}")
-            search_target_name = "Validation"
+    def test_sparse_rating_batches(current_model, current_dataset, rating_batch_fn, eval_batches=None, user_count=None):
+        max_k_eval = max(world.topks)
+        results = {
+            "precision": np.zeros(len(world.topks)),
+            "recall": np.zeros(len(world.topks)),
+            "ndcg": np.zeros(len(world.topks)),
+        }
+        if eval_batches is None or user_count is None:
+            eval_batches, user_count = prepare_eval_batches(current_dataset)
+        if user_count == 0:
+            return results
+
+        with torch.no_grad():
+            for batch_users, all_pos, ground_true, _ in eval_batches:
+                rating_np = rating_batch_fn(np.asarray(batch_users, dtype=np.int64))
+                rating = torch.as_tensor(rating_np, dtype=torch.float32, device=world.device)
+
+                exclude_index = []
+                exclude_items = []
+                for range_i, items_pos in enumerate(all_pos):
+                    exclude_index.extend([range_i] * len(items_pos))
+                    exclude_items.extend(items_pos)
+                if exclude_index:
+                    rating[exclude_index, exclude_items] = -(1 << 10)
+
+                _, rating_k = torch.topk(rating, k=max_k_eval)
+                batch_result = current_model.test_one_batch((rating_k.cpu(), ground_true))
+                results["recall"] += batch_result["recall"]
+                results["precision"] += batch_result["precision"]
+                results["ndcg"] += batch_result["ndcg"]
+                del rating, rating_k
+
+        results["recall"] /= float(user_count)
+        results["precision"] /= float(user_count)
+        results["ndcg"] /= float(user_count)
+        return results
+
+    def tuning_score(results):
+        # return results["recall"][0] + results["ndcg"][0]
+        return results["recall"][0]
+
+    def print_metrics(label, results):
+        fprint(label)
+        fprint(f"Recall@20: {results['recall'][0]:.6f}")
+        fprint(f"Precision: {results['precision'].tolist()}")
+        fprint(f"NDCG:      {results['ndcg'].tolist()}")
+
+    def individual_weight(eig_values, homo_ratio, beta_1, beta_2):
+        eig_values = torch.clamp(eig_values, min=1e-12)
+        y_min, y_max = beta_1, beta_2
+        x_min, x_max = homo_ratio.min(), homo_ratio.max()
+        if torch.isclose(x_min, x_max).item():
+            homo_weight = torch.ones_like(homo_ratio) * y_min
         else:
-            world.cprint(f"Using Full Test Dataset for Parameter Search: {dataset_name}")
-            search_target_name = "Test"
+            homo_weight = (y_max - y_min) / (x_max - x_min) * homo_ratio
+            homo_weight = homo_weight + (x_max * y_min - y_max * x_min) / (x_max - x_min)
+        return eig_values.unsqueeze(0).pow(homo_weight.unsqueeze(1))
 
-        previous_eval_file = os.environ.get("TFRECSYS_EVAL_FILE")
-        try:
-            os.environ["TFRECSYS_EVAL_FILE"] = "val.txt" if val_true == 1 else "test.txt"
-            val_dataset = dataloader.Loader(path=dataset_path)
-            val_eval_batches, val_user_count = prepare_eval_batches(val_dataset)
+    def threshold_offdiag_graph(mat):
+        graph = mat.tocsr(copy=True)
+        graph.setdiag(0)
+        graph.eliminate_zeros()
+        graph.data[graph.data <= 1] = 0
+        graph.eliminate_zeros()
+        graph.data = np.ones(graph.nnz, dtype=np.int8)
+        return graph
 
-            val_model = model.PSEmodel(world.config, val_dataset)
-            val_model.A = sp.bmat([[None, val_model.R], [val_model.R.T, None]], format='csr')
-            base_rowsum = np.array(val_model.A.sum(axis=1)).flatten()
-            base_rowsum[base_rowsum == 0] = 1e-9
+    def count_induced_edges(graph, nodes, marker, stamp):
+        size = len(nodes)
+        if size <= 1:
+            return 0, stamp
+        stamp += 1
+        if stamp == np.iinfo(marker.dtype).max:
+            marker.fill(0)
+            stamp = 1
+        marker[nodes] = stamp
+        count = 0
+        indptr = graph.indptr
+        indices = graph.indices
+        for node in nodes:
+            neighbors = indices[indptr[node]:indptr[node + 1]]
+            count += np.count_nonzero(marker[neighbors] == stamp)
+        return count, stamp
 
-            print(f"\nStarting Optimized Dynamic N-Scale Grid Search on Seed {world.seed} {search_target_name} Data...")
-            print("-" * 80)
-            beta_interval_choices = list(itertools.combinations_with_replacement(sorted(beta_space), b))
-            total_iterations = (len(eps_space) ** 2) * len(alpha_space_1) * (len(alpha_space_2) ** num_scales) * (len(beta_interval_choices) ** num_scales) * (2 ** num_scales)
-            
-            with tqdm(total=total_iterations, desc="Validation Search Progress", unit="it") as pbar:
-                for eps2 in eps_space:
-                    rowsum = base_rowsum + eps2
-                    val_model.D_inv = sp.diags(1. / rowsum)
+    def compute_homophily_ratios(current_model):
+        freq_matrix = current_model.R.astype(np.float32).tocsr()
+        n_users, n_items = freq_matrix.shape
+        train_data = [freq_matrix[u].indices for u in range(n_users)]
+        freq_matrix_csc = freq_matrix.tocsc()
+        train_data_item = [freq_matrix_csc[:, i].indices for i in range(n_items)]
 
-                    for tau in alpha_space_1:
-                        val_model.k = max_k
-                        X_norm = val_model.getNormAdj(val_model.A, val_model.D_inv, alpha1=tau/2, alpha2=tau/2)
-                        U_full, Eigs_full = val_model.Eigendecomposition(X_norm)
+        item_graph = threshold_offdiag_graph(freq_matrix.T.dot(freq_matrix))
+        user_graph = threshold_offdiag_graph(freq_matrix.dot(freq_matrix.T))
 
-                        eig_cache = {}
-                        for idx, current_k in enumerate(k_dimensions):
-                            Eigs_slice = Eigs_full[:current_k]
-                            interval_edges = np.linspace(0, current_k, b + 1, dtype=int)
-                            for beta_tuple in beta_interval_choices:
-                                individual_betas = torch.empty(current_k, dtype=torch.float32, device=val_model.device)
-                                for interval_idx, beta_value in enumerate(beta_tuple):
-                                    start_idx = interval_edges[interval_idx]
-                                    end_idx = interval_edges[interval_idx + 1]
-                                    individual_betas[start_idx:end_idx] = beta_value
-                                eig_cache[(idx, beta_tuple)] = signed_eigen_power(Eigs_slice, individual_betas)
+        homo_ratio_user = np.zeros(n_users, dtype=np.float32)
+        item_marker = np.zeros(n_items, dtype=np.int32)
+        item_stamp = 0
+        for user_idx, items_u in enumerate(train_data):
+            size = len(items_u)
+            if size > 1:
+                edge_count, item_stamp = count_induced_edges(item_graph, items_u, item_marker, item_stamp)
+                homo_ratio_user[user_idx] = edge_count / (size * (size - 1))
 
-                        for eps1 in eps_space:
-                            d_diagonal = base_rowsum + eps1
-                            d_power_cache = {
-                                delta: torch.tensor(d_diagonal ** delta, dtype=torch.float32, device=val_model.device)
-                                for delta in alpha_space_2
-                            }
-                            scaled_slice_cache = {}
-                            for idx, current_k in enumerate(k_dimensions):
-                                U_base_slice = U_full[:, :current_k]
-                                for delta, d_power in d_power_cache.items():
-                                    U_scaled = U_base_slice * d_power.unsqueeze(1)
-                                    scaled_slice_cache[(idx, delta)] = (
-                                        U_scaled[:val_model.n_users, :],
-                                        U_scaled[val_model.n_users:, :]
-                                    )
+        homo_ratio_item = np.zeros(n_items, dtype=np.float32)
+        user_marker = np.zeros(n_users, dtype=np.int32)
+        user_stamp = 0
+        for item_idx, users_i in enumerate(train_data_item):
+            size = len(users_i)
+            if size > 1:
+                edge_count, user_stamp = count_induced_edges(user_graph, users_i, user_marker, user_stamp)
+                homo_ratio_item[item_idx] = edge_count / (size * (size - 1))
 
-                            for delta_tuple, beta_tuple_by_scale, mask_tuple in itertools.product(
-                                itertools.product(alpha_space_2, repeat=num_scales),
-                                itertools.product(beta_interval_choices, repeat=num_scales),
-                                itertools.product([0, 1], repeat=num_scales)
-                            ):
-                                if sum(mask_tuple) == 0:
-                                    pbar.update(1)
-                                    continue
-
-                                transformed_u_user_list = []
-                                transformed_u_item_list = []
-                                for idx, current_k in enumerate(k_dimensions):
-                                    if mask_tuple[idx] == 0:
-                                        continue
-
-                                    current_delta = delta_tuple[idx]
-                                    beta_tuple = beta_tuple_by_scale[idx]
-                                    u_slice, i_slice = scaled_slice_cache[(idx, current_delta)]
-                                    filtered_eigs = eig_cache[(idx, beta_tuple)]
-                                    transformed_u_user_list.append(u_slice * filtered_eigs.unsqueeze(0))
-                                    transformed_u_item_list.append(i_slice * filtered_eigs.unsqueeze(0))
-
-                                U_user_final = torch.cat(transformed_u_user_list, dim=1)
-                                U_item_final = torch.cat(transformed_u_item_list, dim=1)
-
-                                current_results = test_factorized_rating(
-                                    val_model, val_dataset, U_user_final, U_item_final,
-                                    val_eval_batches, val_user_count
-                                )
-                                current_recall = current_results['recall'][0]
-
-                                if current_recall > best_recall:
-                                    best_recall = current_recall
-                                    best_params["tau"] = tau
-                                    best_params["eps1"] = eps1
-                                    best_params["eps2"] = eps2
-                                    for idx in range(num_scales):
-                                        best_params[f"delta{idx+1}"] = delta_tuple[idx]
-                                        best_params[f"mask{idx+1}"] = mask_tuple[idx]
-                                        for interval_idx, beta_value in enumerate(beta_tuple_by_scale[idx]):
-                                            best_params[f"beta{idx+1}_{interval_idx+1}"] = beta_value
-                                    best_val_results = current_results
-
-                                pbar.set_postfix({"Best Recall": f"{best_recall:.4f}", "Cur Recall": f"{current_recall:.4f}"})
-                                pbar.update(1)
-
-                                del U_user_final, U_item_final
-                                if torch.cuda.is_available():
-                                    torch.cuda.empty_cache()
-
-                        del U_full, Eigs_full, eig_cache
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-
-            print("-" * 80)
-            print(f"GRID SEARCH ON {search_target_name.upper()} DATA COMPLETE")
-            print("Best Configuration Discovered (with Piecewise Vectorized Eigenvalue Betas):")
-            for k, v in best_params.items():
-                print(f"  {k}: {v}")
-            print(f"Validation Metrics -> {best_val_results}")
-            print("-" * 80)
-        finally:
-            if previous_eval_file is None:
-                os.environ.pop("TFRECSYS_EVAL_FILE", None)
-            else:
-                os.environ["TFRECSYS_EVAL_FILE"] = previous_eval_file
-
-    if val_true != 0 and best_val_results is None:
-        raise RuntimeError("Validation search did not find a valid configuration.")
-
-    if val_true != 0:
-        validation_total_runtime = time.time() - validation_start_time
-        validation_hours = int(validation_total_runtime // 3600)
-        validation_minutes = int((validation_total_runtime % 3600) // 60)
-        validation_seconds = validation_total_runtime % 60
-        print(
-            f"Validation Total Runtime: {validation_total_runtime:.2f} seconds "
-            f"({validation_hours:02d}:{validation_minutes:02d}:{validation_seconds:05.2f})"
+        return (
+            torch.as_tensor(homo_ratio_user, dtype=torch.float32, device=world.device),
+            torch.as_tensor(homo_ratio_item, dtype=torch.float32, device=world.device),
         )
 
+    def safe_rank(current_model, requested_k):
+        total_nodes = current_model.n_users + current_model.m_items
+        return max(1, min(int(requested_k), total_nodes - 2))
+
+    def compute_asym_components(current_model, tau, delta, k):
+        current_k = safe_rank(current_model, k)
+        original_k = current_model.k
+        current_model.k = current_k
+        norm_alpha, norm_beta = tau_delta_to_alpha_beta(tau, delta)
+        rowsum = np.array(current_model.A.sum(axis=1)).flatten()
+        rowsum[rowsum == 0] = 1e-9
+        current_model.D_inv = sp.diags(1.0 / rowsum)
+        X_norm = current_model.getNormAdj(
+            current_model.A,
+            current_model.D_inv,
+            alpha1=norm_alpha,
+            alpha2=norm_beta,
+        )
+        _, U_R, eigs = current_model.Eigendecomposition_Asym(X_norm)
+        current_model.k = original_k
+        eig_filter_values = torch.abs(eigs[:current_k])
+        eig_filter_values = eig_filter_values / torch.clamp(torch.max(eig_filter_values), min=1e-12)
+        return U_R[:, :current_k], eigs[:current_k], eig_filter_values
+
+    def build_individual_filter_factors(current_model, params, homo_user, homo_item, component_cache):
+        cache_key = (params["tau"], params["delta"], params["k"])
+        if cache_key not in component_cache:
+            component_cache[cache_key] = compute_asym_components(
+                current_model,
+                params["tau"],
+                params["delta"],
+                params["k"],
+            )
+
+        U_R, _, eig_filter_values = component_cache[cache_key]
+
+        user_filter = individual_weight(eig_filter_values, homo_user, params["beta_1"], params["beta_2"])
+        item_filter = individual_weight(eig_filter_values, homo_item, params["beta_1"], params["beta_2"])
+        user_factors = U_R[:current_model.n_users, :] * user_filter
+        item_factors = U_R[current_model.n_users:, :] * item_filter
+        return user_factors, item_factors
+
+    def compute_sgfcf_components(current_model, params, sgfcf_component_cache):
+        current_k = max(1, min(int(params["k"]), min(current_model.n_users, current_model.m_items) - 1))
+        cache_key = (current_k, params["alpha"], params["eps"])
+        if cache_key not in sgfcf_component_cache:
+            freq_matrix = current_model.R.astype(np.float32).tocsr()
+            user_degree = np.array(freq_matrix.sum(axis=1)).flatten()
+            item_degree = np.array(freq_matrix.sum(axis=0)).flatten()
+            with np.errstate(divide="ignore"):
+                d_u = 1.0 / np.power(user_degree + params["alpha"], params["eps"])
+                d_i = 1.0 / np.power(item_degree + params["alpha"], params["eps"])
+            d_u[np.isinf(d_u)] = 0.0
+            d_i[np.isinf(d_i)] = 0.0
+
+            norm_freq_matrix = sp.diags(d_u).dot(freq_matrix).dot(sp.diags(d_i)).astype(np.float32).tocsr()
+            svd_rank = min(current_k + 200, min(current_model.n_users, current_model.m_items) - 1)
+            if svd_rank < 1:
+                raise ValueError("SGFCF requires at least two users/items for SVD.")
+            u_mat, s_mat, vt_mat = svds(norm_freq_matrix, k=svd_rank)
+            sort_idx = np.argsort(s_mat)[::-1]
+            s_mat = s_mat[sort_idx]
+            u_mat = u_mat[:, sort_idx]
+            vt_mat = vt_mat[sort_idx, :]
+
+            U = torch.as_tensor(u_mat, dtype=torch.float32, device=world.device)
+            value = torch.as_tensor(s_mat, dtype=torch.float32, device=world.device)
+            value = value / torch.clamp(torch.max(value), min=1e-12)
+            V = torch.as_tensor(vt_mat.T, dtype=torch.float32, device=world.device)
+            sgfcf_component_cache[cache_key] = (
+                U,
+                value,
+                V,
+                norm_freq_matrix.tocsr(),
+                norm_freq_matrix.tocsc(),
+                current_k,
+            )
+
+        return sgfcf_component_cache[cache_key]
+
+    def build_sgfcf_factors(current_model, params, homo_user, homo_item, sgfcf_component_cache):
+        U, value, V, norm_freq_csr, norm_freq_csc, current_k = compute_sgfcf_components(
+            current_model,
+            params,
+            sgfcf_component_cache,
+        )
+        value_slice = value[:current_k]
+        user_filter = individual_weight(value_slice, homo_user, params["beta_1"], params["beta_2"])
+        item_filter = individual_weight(value_slice, homo_item, params["beta_1"], params["beta_2"])
+        user_factors = U[:, :current_k] * user_filter
+        item_factors = V[:, :current_k] * item_filter
+        return user_factors, item_factors, norm_freq_csr, norm_freq_csc
+
+    def build_nonhomophily_sgfcf_factors(current_model, params, sgfcf_component_cache):
+        U, value, V, norm_freq_csr, norm_freq_csc, current_k = compute_sgfcf_components(
+            current_model,
+            params,
+            sgfcf_component_cache,
+        )
+        global_filter = torch.clamp(value[:current_k], min=1e-12).pow(params["beta"]).unsqueeze(0)
+        user_factors = U[:, :current_k] * global_filter
+        item_factors = V[:, :current_k] * global_filter
+        return user_factors, item_factors, norm_freq_csr, norm_freq_csc
+
+    def test_sgfcf_rating(
+        current_model,
+        current_dataset,
+        user_factors,
+        item_factors,
+        norm_freq_csr,
+        norm_freq_csc,
+        gamma,
+        eval_batches=None,
+        user_count=None,
+    ):
+        max_k_eval = max(world.topks)
+        results = {
+            "precision": np.zeros(len(world.topks)),
+            "recall": np.zeros(len(world.topks)),
+            "ndcg": np.zeros(len(world.topks)),
+        }
+        if eval_batches is None or user_count is None:
+            eval_batches, user_count = prepare_eval_batches(current_dataset)
+        if user_count == 0:
+            return results
+
+        with torch.no_grad():
+            for batch_users, all_pos, ground_true, batch_users_gpu in eval_batches:
+                rating = user_factors[batch_users_gpu, :] @ item_factors.t()
+                rating_sum = rating.sum(dim=1, keepdim=True)
+                rating_sum[rating_sum == 0] = 1.0
+                rating = rating / rating_sum
+
+                norm_conv = norm_freq_csr[batch_users].dot(norm_freq_csc.T).dot(norm_freq_csr).toarray()
+                norm_conv_sum = norm_conv.sum(axis=1, keepdims=True)
+                norm_conv_sum[norm_conv_sum == 0] = 1.0
+                norm_conv = norm_conv / norm_conv_sum
+                norm_conv_t = torch.as_tensor(norm_conv, dtype=torch.float32, device=world.device)
+                rating = torch.sigmoid(rating + gamma * norm_conv_t)
+
+                exclude_index = []
+                exclude_items = []
+                for range_i, items_pos in enumerate(all_pos):
+                    exclude_index.extend([range_i] * len(items_pos))
+                    exclude_items.extend(items_pos)
+                if exclude_index:
+                    rating[exclude_index, exclude_items] = -(1 << 10)
+
+                _, rating_k = torch.topk(rating, k=max_k_eval)
+                batch_result = current_model.test_one_batch((rating_k.cpu(), ground_true))
+                results["recall"] += batch_result["recall"]
+                results["precision"] += batch_result["precision"]
+                results["ndcg"] += batch_result["ndcg"]
+                del rating, rating_k
+
+        results["recall"] /= float(user_count)
+        results["precision"] /= float(user_count)
+        results["ndcg"] /= float(user_count)
+        return results
+
+    def evaluate_individual_filter_model(current_model, current_dataset, params, homo_user, homo_item, component_cache, eval_batches=None, user_count=None):
+        user_factors, item_factors = build_individual_filter_factors(
+            current_model,
+            params,
+            homo_user,
+            homo_item,
+            component_cache,
+        )
+        return test_factorized_rating(
+            current_model,
+            current_dataset,
+            user_factors,
+            item_factors,
+            eval_batches,
+            user_count,
+        )
+
+    def evaluate_sgfcf_model(current_model, current_dataset, params, homo_user, homo_item, sgfcf_component_cache, eval_batches=None, user_count=None):
+        user_factors, item_factors, norm_freq_csr, norm_freq_csc = build_sgfcf_factors(
+            current_model,
+            params,
+            homo_user,
+            homo_item,
+            sgfcf_component_cache,
+        )
+        return test_sgfcf_rating(
+            current_model,
+            current_dataset,
+            user_factors,
+            item_factors,
+            norm_freq_csr,
+            norm_freq_csc,
+            params["gamma"],
+            eval_batches,
+            user_count,
+        )
+
+    def evaluate_nonhomophily_sgfcf_model(current_model, current_dataset, params, sgfcf_component_cache, eval_batches=None, user_count=None):
+        user_factors, item_factors, norm_freq_csr, norm_freq_csc = build_nonhomophily_sgfcf_factors(
+            current_model,
+            params,
+            sgfcf_component_cache,
+        )
+        return test_sgfcf_rating(
+            current_model,
+            current_dataset,
+            user_factors,
+            item_factors,
+            norm_freq_csr,
+            norm_freq_csc,
+            params["gamma"],
+            eval_batches,
+            user_count,
+        )
+
+    def search_hyperparameters(search_model, search_dataset):
+        search_batches, search_user_count = prepare_eval_batches(search_dataset)
+        homo_user, homo_item = compute_homophily_ratios(search_model)
+        component_cache = {}
+        best_params = None
+        best_results = None
+        best_score = -1.0
+
+        tau_delta_pairs = [
+            (tau, delta)
+            for tau, delta in itertools.product(tau_space, delta_space)
+            if is_valid_tau_delta(tau, delta)
+        ]
+        search_space = list(itertools.product(tau_delta_pairs, individual_filter_space))
+        with tqdm(total=len(search_space), desc="Individual Filter Search", unit="cfg") as pbar:
+            for (tau, delta), (beta_1, beta_2) in search_space:
+                params = {
+                    "tau": tau,
+                    "delta": delta,
+                    "beta_1": beta_1,
+                    "beta_2": beta_2,
+                    "k": max_k,
+                }
+                results = evaluate_individual_filter_model(
+                    search_model,
+                    search_dataset,
+                    params,
+                    homo_user,
+                    homo_item,
+                    component_cache,
+                    search_batches,
+                    search_user_count,
+                )
+                score = tuning_score(results)
+                if best_results is None or score > best_score:
+                    best_params = dict(params)
+                    best_results = results
+                    best_score = score
+                pbar.set_postfix({
+                    "best": f"{best_score:.4f}",
+                    "cur": f"{score:.4f}",
+                })
+                pbar.update(1)
+
+        return best_params, best_results, best_score
+
+    def search_nonhomophily_sgfcf_hyperparameters(search_model, search_dataset):
+        search_batches, search_user_count = prepare_eval_batches(search_dataset)
+        sgfcf_component_cache = {}
+        best_params = None
+        best_results = None
+        best_score = -1.0
+
+        search_space = list(nonhomophily_sgfcf_beta_space)
+        with tqdm(total=len(search_space), desc="nonhomophily_SGFCF Search", unit="cfg") as pbar:
+            for beta in search_space:
+                params = dict(default_nonhomophily_sgfcf_params)
+                params["beta"] = beta
+                results = evaluate_nonhomophily_sgfcf_model(
+                    search_model,
+                    search_dataset,
+                    params,
+                    sgfcf_component_cache,
+                    search_batches,
+                    search_user_count,
+                )
+                score = tuning_score(results)
+                if best_results is None or score > best_score:
+                    best_params = dict(params)
+                    best_results = results
+                    best_score = score
+                pbar.set_postfix({
+                    "best": f"{best_score:.4f}",
+                    "cur": f"{score:.4f}",
+                })
+                pbar.update(1)
+
+        return best_params, best_results, best_score
+
+    def run_final_tests(test_dataset, individual_params, sgfcf_params, nonhomophily_sgfcf_params):
+        test_model = model.PSEmodel(world.config, test_dataset)
+        homo_user, homo_item = compute_homophily_ratios(test_model)
+        component_cache = {}
+        sgfcf_component_cache = {}
+        individual_results = evaluate_individual_filter_model(
+            test_model,
+            test_dataset,
+            individual_params,
+            homo_user,
+            homo_item,
+            component_cache,
+        )
+        sgfcf_results = evaluate_sgfcf_model(
+            test_model,
+            test_dataset,
+            sgfcf_params,
+            homo_user,
+            homo_item,
+            sgfcf_component_cache,
+        )
+        nonhomophily_sgfcf_results = evaluate_nonhomophily_sgfcf_model(
+            test_model,
+            test_dataset,
+            nonhomophily_sgfcf_params,
+            sgfcf_component_cache,
+        )
+        return individual_results, sgfcf_results, nonhomophily_sgfcf_results, test_model
+
+    def run_baseline_tests(test_model, test_dataset, k):
+        baseline_alpha = fixed_asym_alpha
+        baseline_beta = fixed_asym_beta
+        baseline_tau, baseline_delta = alpha_beta_to_tau_delta(baseline_alpha, baseline_beta)
+        recovered_alpha, recovered_beta = tau_delta_to_alpha_beta(baseline_tau, baseline_delta)
+        if not np.isclose(recovered_alpha, baseline_alpha) or not np.isclose(recovered_beta, baseline_beta):
+            raise ValueError("alpha/beta and tau/delta conversion failed.")
+
+        fprint(
+            "Baseline normalization: "
+            f"alpha={baseline_alpha}, beta={baseline_beta}, "
+            f"tau=alpha+beta={baseline_tau}, "
+            f"delta=(beta-alpha)/2={baseline_delta}"
+        )
+
+        current_k = safe_rank(test_model, k)
+        original_k = test_model.k
+        test_model.k = current_k
+        rowsum = np.array(test_model.A.sum(axis=1)).flatten()
+        rowsum[rowsum == 0] = 1e-9
+        test_model.D_inv = sp.diags(1.0 / rowsum)
+        X_norm = test_model.getNormAdj(
+            test_model.A,
+            test_model.D_inv,
+            alpha1=baseline_alpha,
+            alpha2=baseline_beta,
+        )
+        _, U_R, eigs = test_model.Eigendecomposition_Asym(X_norm)
+        test_model.k = original_k
+        U_R = U_R[:, :current_k]
+        eigs = eigs[:current_k]
+        user_U = U_R[:test_model.n_users, :]
+        item_U = U_R[test_model.n_users:, :]
+
+        baseline_plain = test_factorized_rating(test_model, test_dataset, user_U, item_U)
+        print_metrics("Baseline Asymmetric Eigenvector: U_R U_R^T", baseline_plain)
+
+        baseline_lambda = test_factorized_rating(
+            test_model,
+            test_dataset,
+            user_U * eigs.unsqueeze(0),
+            item_U,
+        )
+        print_metrics("Baseline Asymmetric Eigenvector: U_R Lambda U_R^T", baseline_lambda)
+
+        baseline_lambda2 = test_factorized_rating(
+            test_model,
+            test_dataset,
+            user_U * (eigs ** 2).unsqueeze(0),
+            item_U,
+        )
+        print_metrics("Baseline Asymmetric Eigenvector: U_R Lambda^2 U_R^T", baseline_lambda2)
+
+        R = test_model.R.astype(np.float32).tocsr()
+        user_degree = np.array(R.sum(axis=1)).flatten()
+        item_degree = np.array(R.sum(axis=0)).flatten()
+        user_degree[user_degree == 0] = 1e-9
+        item_degree[item_degree == 0] = 1e-9
+        R_tilde = (
+            sp.diags(np.power(user_degree, -baseline_alpha))
+            .dot(R)
+            .dot(sp.diags(np.power(item_degree, -baseline_beta)))
+            .tocsr()
+        )
+        R_tilde_t = R_tilde.T.tocsr()
+
+        def r_tilde_cubic_batch(batch_users):
+            return R_tilde[batch_users].dot(R_tilde_t).dot(R_tilde).toarray()
+
+        baseline_r_tilde = test_sparse_rating_batches(test_model, test_dataset, r_tilde_cubic_batch)
+        print_metrics("Baseline R_tilde R_tilde^T R_tilde", baseline_r_tilde)
+
     # ---------------------------------------------------------
-    # 3. Out-Of-Sample Evaluation Using the Best Split Configurations
+    # 2. Hyperparameter search
     # ---------------------------------------------------------
-    world.cprint(f"\nEvaluating Best Hyperparameters on the Main Dataset Layer...")
-    
-    eval_model = model.PSEmodel(world.config, test_dataset)
-    eval_model.A = sp.bmat([[None, eval_model.R], [eval_model.R.T, None]], format='csr')
-    eval_base_rowsum = np.array(eval_model.A.sum(axis=1)).flatten()
-    eval_base_rowsum[eval_base_rowsum == 0] = 1e-9
+    world.cprint(f"Dataset root: {data_root}")
+    world.cprint(f"Selected dataset: {dataset_name}")
+    world.cprint(f"val_true: {val_true}")
 
-    tau_opt = best_params['tau']
-    eps1_opt = best_params['eps1']
-    eps2_opt = best_params['eps2']
+    with open("main_out.txt", "w") as out_file:
+        fprint(f"Seed: {world.seed}")
+        fprint(f"Dataset path: {dataset_path}")
+        fprint(f"val_true: {val_true}")
+        fprint(f"Default individual-filter params: {default_params}")
+        fprint(f"Default SGFCF params: {default_sgfcf_params}")
+        fprint(f"Default nonhomophily_SGFCF params: {default_nonhomophily_sgfcf_params}")
 
-    eval_rowsum = eval_base_rowsum + eps2_opt
-    eval_model.D_inv = sp.diags(1. / eval_rowsum)
-    d_diagonal_eval = eval_base_rowsum + eps1_opt
+        best_sgfcf_params = dict(default_sgfcf_params)
+        if val_true == 0:
+            best_params = dict(default_params)
+            best_nonhomophily_sgfcf_params = dict(default_nonhomophily_sgfcf_params)
+            best_search_results = None
+            best_search_score = None
+            best_nonhomophily_sgfcf_search_results = None
+            best_nonhomophily_sgfcf_search_score = None
+            fprint("Skipping hyperparameter search; using default params.")
+        else:
+            search_eval_file = "val.txt" if val_true == 1 else "test.txt"
+            search_name = "validation" if val_true == 1 else "test"
+            search_dataset = load_dataset(search_eval_file)
+            search_model = model.PSEmodel(world.config, search_dataset)
+            fprint(f"Starting individual-filter hyperparameter search on {search_name} dataset ({search_eval_file}).")
+            search_start = time.time()
+            best_params, best_search_results, best_search_score = search_hyperparameters(search_model, search_dataset)
+            search_runtime = time.time() - search_start
+            fprint(f"Individual-filter search complete in {search_runtime:.2f} seconds.")
+            fprint(f"Best individual-filter search params: {best_params}")
+            fprint(f"Best individual-filter search score: {best_search_score:.6f}")
+            print_metrics("Best individual-filter search metrics", best_search_results)
 
-    eval_model.k = max_k
-    X_norm_eval = eval_model.getNormAdj(eval_model.A, eval_model.D_inv, alpha1=tau_opt/2, alpha2=tau_opt/2)
-    U_full_eval, Eigs_full_eval = eval_model.Eigendecomposition(X_norm_eval)
+            fprint()
+            fprint(
+                "Starting nonhomophily_SGFCF hyperparameter search "
+                f"on {search_name} dataset ({search_eval_file})."
+            )
+            nonhomophily_sgfcf_search_start = time.time()
+            best_nonhomophily_sgfcf_params, best_nonhomophily_sgfcf_search_results, best_nonhomophily_sgfcf_search_score = search_nonhomophily_sgfcf_hyperparameters(
+                search_model,
+                search_dataset,
+            )
+            nonhomophily_sgfcf_search_runtime = time.time() - nonhomophily_sgfcf_search_start
+            fprint(f"nonhomophily_SGFCF search complete in {nonhomophily_sgfcf_search_runtime:.2f} seconds.")
+            fprint(f"Best nonhomophily_SGFCF search params: {best_nonhomophily_sgfcf_params}")
+            fprint(f"Best nonhomophily_SGFCF search score: {best_nonhomophily_sgfcf_search_score:.6f}")
+            print_metrics("Best nonhomophily_SGFCF search metrics", best_nonhomophily_sgfcf_search_results)
 
-    eval_u_user_list = []
-    eval_u_item_list = []
+        # ---------------------------------------------------------
+        # 3. Final test
+        # ---------------------------------------------------------
+        test_dataset = load_dataset("test.txt")
+        fprint()
+        fprint("Final Test")
+        final_test_results, final_sgfcf_test_results, final_nonhomophily_sgfcf_test_results, final_test_model = run_final_tests(
+            test_dataset,
+            best_params,
+            best_sgfcf_params,
+            best_nonhomophily_sgfcf_params,
+        )
+        fprint(f"Final individual-filter params: {best_params}")
+        print_metrics("Right-Eigenvector Individual Filter Test", final_test_results)
+        fprint()
+        fprint(f"Final SGFCF params: {best_sgfcf_params}")
+        print_metrics("SGFCF Test", final_sgfcf_test_results)
+        fprint()
+        fprint(f"Final nonhomophily_SGFCF params: {best_nonhomophily_sgfcf_params}")
+        fprint("nonhomophily_SGFCF score: global beta filter without homophily ratios")
+        print_metrics("nonhomophily_SGFCF Test", final_nonhomophily_sgfcf_test_results)
 
-    for idx, current_k in enumerate(k_dimensions):
-        if best_params[f"mask{idx+1}"] == 0:
-            continue
-            
-        opt_delta_scale = best_params[f"delta{idx+1}"]
-        opt_beta_tuple = tuple(best_params[f"beta{idx+1}_{interval_idx+1}"] for interval_idx in range(b))
-        
-        U_eval_slice = U_full_eval[:, :current_k]
-        Eigs_eval_slice = Eigs_full_eval[:current_k]
-        
-        d_power_eval = torch.tensor(d_diagonal_eval ** opt_delta_scale, dtype=torch.float32, device=eval_model.device)
-        U_trans_scaled = U_eval_slice * d_power_eval.unsqueeze(1)
-        
-        u_eval_slice = U_trans_scaled[:eval_model.n_users, :]
-        i_eval_slice = U_trans_scaled[eval_model.n_users:, :]
-        
-        eval_interval_edges = np.linspace(0, current_k, b + 1, dtype=int)
-        eval_individual_betas = torch.empty(current_k, dtype=torch.float32, device=eval_model.device)
-        for interval_idx, beta_value in enumerate(opt_beta_tuple):
-            start_idx = eval_interval_edges[interval_idx]
-            end_idx = eval_interval_edges[interval_idx + 1]
-            eval_individual_betas[start_idx:end_idx] = beta_value
-        
-        filtered_eval_eigs = signed_eigen_power(Eigs_eval_slice, eval_individual_betas)
-        
-        u_eval_filtered = u_eval_slice * filtered_eval_eigs.unsqueeze(0)
-        i_eval_filtered = i_eval_slice * filtered_eval_eigs.unsqueeze(0)
-        
-        eval_u_user_list.append(u_eval_filtered)
-        eval_u_item_list.append(i_eval_filtered)
-
-    U_user_eval_final = torch.cat(eval_u_user_list, dim=1)
-    U_item_eval_final = torch.cat(eval_u_item_list, dim=1)
-
-    with torch.no_grad():
-        final_test_results = test_factorized_rating(eval_model, test_dataset, U_user_eval_final, U_item_eval_final)
-        
-        print("=" * 80)
-        print(f"FINAL OUT-OF-SAMPLE TEST METRICS (MAIN DATASET : {world.dataset}):")
-        print(f"Global Tuned Configuration (seed={world.seed}): {best_params}")
-        print(f"Recall@20: {final_test_results['recall'][0]:.6f}")
-        print(f"Precision: {final_test_results['precision'].tolist()}")
-        print(f"NDCG:      {final_test_results['ndcg'].tolist()}")
-        print("=" * 80)
-
-    X_norm_eval = eval_model.getNormAdj(eval_model.A, eval_model.D_inv, alpha1=0.2, alpha2=0.4)
-    U_full_eval_L, U_full_eval_R, Eigs_full_eval = eval_model.Eigendecomposition_Asym(X_norm_eval)
-    print("Eigenvalues (first/last):",Eigs_full_eval[0].item(),Eigs_full_eval[-1].item())
-    print("Eigenvalues (min/max):",torch.min(Eigs_full_eval).item(),torch.max(Eigs_full_eval).item())
-
-    print()
-    results = eval_model.Test_RatingMatrix(U_full_eval_R[:eval_model.n_users,:] @ U_full_eval_R[eval_model.n_users:,:].T, eval_model.dataset)
-    print(f"E=U_R")
-    print(f"Recall@20: {results['recall'][0]:.6f}")
-    print(f"Precision: {results['precision'].tolist()}")
-    print(f"NDCG:      {results['ndcg'].tolist()}")
-
-    results = eval_model.Test_RatingMatrix(U_full_eval_R[:eval_model.n_users,:] @ torch.diag(Eigs_full_eval) @ U_full_eval_R[eval_model.n_users:,:].T, eval_model.dataset)
-    print(f"E=U_R Lambda^0.5")
-    print(f"Recall@20: {results['recall'][0]:.6f}")
-    print(f"Precision: {results['precision'].tolist()}")
-    print(f"NDCG:      {results['ndcg'].tolist()}")
-
-    results = eval_model.Test_RatingMatrix(U_full_eval_R[:eval_model.n_users,:] @ torch.diag(Eigs_full_eval**2) @ U_full_eval_R[eval_model.n_users:,:].T, eval_model.dataset)
-    print(f"E=U_R Lambda^1.0")
-    print(f"Recall@20: {results['recall'][0]:.6f}")
-    print(f"Precision: {results['precision'].tolist()}")
-    print(f"NDCG:      {results['ndcg'].tolist()}")
+        # ---------------------------------------------------------
+        # 4. Baseline asymmetric eigenvector tests
+        # ---------------------------------------------------------
+        fprint()
+        fprint("Baseline Eigenvector and R_tilde Model Tests")
+        run_baseline_tests(
+            final_test_model,
+            test_dataset,
+            best_params["k"],
+        )
 
 finally:
     if world.tensorboard:
