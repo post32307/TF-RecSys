@@ -277,7 +277,12 @@ try:
         "gamma": default_sgfcf_params["gamma"],
     }
     default_quantized_sgfcf_params = dict(default_sgfcf_params)
-    beta_quantization_step = 0.5
+    beta_quantization_values = torch.tensor(
+        [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3],
+        # [0.7, 0.9, 1.1, 1.3],
+        dtype=torch.float32,
+        device=world.device,
+    )
     tau_space = [0.2, 0.4, 0.6, 0.8]
     delta_space = [0.0, 0.1, 0.2, 0.3]
     individual_filter_space = [
@@ -454,7 +459,12 @@ try:
         else:
             homo_weight = (y_max - y_min) / (x_max - x_min) * homo_ratio
             homo_weight = homo_weight + (x_max * y_min - y_max * x_min) / (x_max - x_min)
-        homo_weight = torch.round(homo_weight / beta_quantization_step) * beta_quantization_step
+        quantization_values = beta_quantization_values.to(homo_weight.device)
+        nearest_idx = torch.argmin(
+            torch.abs(homo_weight.unsqueeze(1) - quantization_values.unsqueeze(0)),
+            dim=1,
+        )
+        homo_weight = quantization_values[nearest_idx]
         return eig_values.unsqueeze(0).pow(homo_weight.unsqueeze(1))
 
     def threshold_offdiag_graph(mat):
@@ -966,7 +976,7 @@ try:
         fprint(f"Default individual-filter params: {default_params}")
         fprint(f"Default SGFCF params: {default_sgfcf_params}")
         fprint(f"Default quantized_SGFCF params: {default_quantized_sgfcf_params}")
-        fprint(f"quantized_SGFCF beta grid step: {beta_quantization_step}")
+        fprint(f"quantized_SGFCF beta set: {beta_quantization_values.detach().cpu().tolist()}")
         fprint(f"Default nonhomophily_SGFCF params: {default_nonhomophily_sgfcf_params}")
 
         best_sgfcf_params = dict(default_sgfcf_params)
@@ -1029,7 +1039,7 @@ try:
         print_metrics("SGFCF Test", final_sgfcf_test_results)
         fprint()
         fprint(f"Final quantized_SGFCF params: {best_quantized_sgfcf_params}")
-        fprint(f"quantized_SGFCF score: homophily-derived beta rounded to nearest {beta_quantization_step}")
+        fprint("quantized_SGFCF score: homophily-derived beta rounded to nearest value in B")
         print_metrics("quantized_SGFCF Test", final_quantized_sgfcf_test_results)
         fprint()
         fprint(f"Final nonhomophily_SGFCF params: {best_nonhomophily_sgfcf_params}")

@@ -2004,3 +2004,184 @@ BSPM       | yelp2018             | (Val) Recall@20: 0.104862, NDCG@20: 0.063911
 BSPM       | yelp2018             | (Val) Recall@20: 0.109426, NDCG@20: 0.0675617                | 03:05    | solver_shr=euler, K_s=1, T_s=1.0, final_sharpening=True, t_point_combination=False, idl_beta=0.3, factor_dim=256
 BSPM       | yelp2018             | (Val) Recall@20: 0.110227, NDCG@20: 0.0685272                | 05:04    | solver_shr=euler, K_s=1, T_s=1.0, final_sharpening=True, t_point_combination=False, idl_beta=0.3, factor_dim=512
 BSPM       | yelp2018             | (Val) Recall@20: 0.106559, NDCG@20: 0.0672472                | 08:37    | solver_shr=euler, K_s=1, T_s=1.0, final_sharpening=True, t_point_combination=False, idl_beta=0.3, factor_dim=1024
+BSPM       | yelp2018             | (Val) Recall@20: 0.0898374, NDCG@20: 0.0539721               | 05:09    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=32
+BSPM       | yelp2018             | (Val) Recall@20: 0.0962213, NDCG@20: 0.0582642               | 05:08    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=64
+BSPM       | yelp2018             | (Val) Recall@20: 0.102719, NDCG@20: 0.0626011                | 05:23    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=128
+BSPM       | yelp2018             | (Val) Recall@20: 0.106578, NDCG@20: 0.0660027                | 05:57    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=256
+BSPM       | yelp2018             | (Val) Recall@20: 0.108369, NDCG@20: 0.0671993                | 07:32    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=512
+BSPM       | yelp2018             | (Val) Recall@20: 0.105495, NDCG@20: 0.0664876                | 11:25    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=1024
+BSPM       | yelp2018             | (Val) Recall@20: 0.100719, NDCG@20: 0.0617614                | 02:37    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=32
+BSPM       | yelp2018             | (Val) Recall@20: 0.103391, NDCG@20: 0.0634838                | 02:37    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=64
+BSPM       | yelp2018             | (Val) Recall@20: 0.106993, NDCG@20: 0.06567                  | 02:46    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=128
+BSPM       | yelp2018             | (Val) Recall@20: 0.110002, NDCG@20: 0.0683735                | 03:28    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=256
+BSPM       | yelp2018             | (Val) Recall@20: 0.111272, NDCG@20: 0.0693828                | 05:12    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=512
+BSPM       | yelp2018             | (Val) Recall@20: 0.10858, NDCG@20: 0.068517                  | 08:51    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=1024
+BSPM       | yelp2018             | (Val) Recall@20: 0.0864867, NDCG@20: 0.0517524               | 08:30    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=32
+BSPM       | yelp2018             | (Val) Recall@20: 0.0942581, NDCG@20: 0.0573349               | 08:52    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=64
+BSPM       | yelp2018             | (Val) Recall@20: 0.102241, NDCG@20: 0.0623206                | 08:20    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=128
+BSPM       | yelp2018             | (Val) Recall@20: 0.108091, NDCG@20: 0.0665627                | 09:18    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=256
+BSPM       | yelp2018             | (Val) Recall@20: 0.109023, NDCG@20: 0.0678134                | 10:47    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=512
+BSPM       | yelp2018             | (Val) Recall@20: 0.106526, NDCG@20: 0.0672028                | 14:35    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=False, idl_beta=0.3, factor_dim=1024
+BSPM       | yelp2018             | (Val) Recall@20: 0.0972668, NDCG@20: 0.0591999               | 04:58    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=32
+BSPM       | yelp2018             | (Val) Recall@20: 0.101351, NDCG@20: 0.0617996                | 04:58    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=64
+BSPM       | yelp2018             | (Val) Recall@20: 0.105107, NDCG@20: 0.0645586                | 05:13    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=128
+BSPM       | yelp2018             | (Val) Recall@20: 0.108126, NDCG@20: 0.0670153                | 05:45    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=256
+BSPM       | yelp2018             | (Val) Recall@20: 0.109197, NDCG@20: 0.067912                 | 07:20    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=512
+BSPM       | yelp2018             | (Val) Recall@20: 0.10712, NDCG@20: 0.067483                  | 10:52    | solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.1, factor_dim=1024
+BSPM       | yelp2018             | (Val) Recall@20: 0.0963672, NDCG@20: 0.0581469               | 02:25    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=32
+BSPM       | yelp2018             | (Val) Recall@20: 0.0998537, NDCG@20: 0.0609191               | 02:24    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=64
+BSPM       | yelp2018             | (Val) Recall@20: 0.105273, NDCG@20: 0.0642496                | 02:57    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=128
+BSPM       | yelp2018             | (Val) Recall@20: 0.109149, NDCG@20: 0.0674067                | 03:21    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=256
+BSPM       | yelp2018             | (Val) Recall@20: 0.110393, NDCG@20: 0.0685624                | 04:48    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=512
+BSPM       | yelp2018             | (Val) Recall@20: 0.107439, NDCG@20: 0.0678733                | 09:23    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.5, factor_dim=1024
+BSPM       | yelp2018             | (Val) Recall@20: 0.0770526, NDCG@20: 0.046374                | 08:27    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=32
+BSPM       | yelp2018             | (Val) Recall@20: 0.0882812, NDCG@20: 0.0536025               | 08:07    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=64
+BSPM       | yelp2018             | (Val) Recall@20: 0.0984047, NDCG@20: 0.0600014               | 08:23    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=128
+BSPM       | yelp2018             | (Val) Recall@20: 0.105674, NDCG@20: 0.064928                 | 08:57    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=256
+BSPM       | yelp2018             | (Val) Recall@20: 0.107846, NDCG@20: 0.0667253                | 10:27    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=512
+BSPM       | yelp2018             | (Val) Recall@20: 0.105392, NDCG@20: 0.066293                 | 14:22    | solver_shr=rk4, K_s=2, T_s=2.2, final_sharpening=False, t_point_combination=True, idl_beta=0.7, factor_dim=1024
+EASE       | yelp2018             | (Val) Recall@20: 0.092, NDCG@20: 0.0596                      | 09:00    | lambda_=50
+EASE       | yelp2018             | (Val) Recall@20: 0.0984, NDCG@20: 0.0628                     | 07:50    | lambda_=100
+EASE       | yelp2018             | (Val) Recall@20: 0.1017, NDCG@20: 0.0643                     | 08:23    | lambda_=200
+EASE       | yelp2018             | (Val) Recall@20: 0.1016, NDCG@20: 0.0636                     | 07:43    | lambda_=500
+EASE       | yelp2018             | (Val) Recall@20: 0.0983, NDCG@20: 0.0611                     | 07:43    | lambda_=1000
+EASE       | yelp2018             | (Val) Recall@20: 0.0919, NDCG@20: 0.0571                     | 08:03    | lambda_=2000
+GF-CF      | yelp2018             | (Val) Recall@20: 0.0861384, NDCG@20: 0.0519556               | 01:35    | k=32
+GF-CF      | yelp2018             | (Val) Recall@20: 0.0932305, NDCG@20: 0.0567532               | 01:29    | k=64
+GF-CF      | yelp2018             | (Val) Recall@20: 0.100402, NDCG@20: 0.0613923                | 01:52    | k=128
+GF-CF      | yelp2018             | (Val) Recall@20: 0.106463, NDCG@20: 0.0654777                | 02:25    | k=256
+GF-CF      | yelp2018             | (Val) Recall@20: 0.108716, NDCG@20: 0.0672781                | 03:52    | k=512
+GF-CF      | yelp2018             | (Val) Recall@20: 0.106922, NDCG@20: 0.0670735                | 07:36    | k=1024
+PGSP       | yelp2018             | (Val) Recall@20: 0.0681, NDCG@20: 0.0412                     | 02:08    | k=32, phi=0.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.073, NDCG@20: 0.0444                      | 00:34    | k=32, phi=0.25
+PGSP       | yelp2018             | (Val) Recall@20: 0.0774, NDCG@20: 0.0471                     | 00:34    | k=32, phi=0.5
+PGSP       | yelp2018             | (Val) Recall@20: 0.0807, NDCG@20: 0.0491                     | 00:34    | k=32, phi=0.75
+PGSP       | yelp2018             | (Val) Recall@20: 0.0825, NDCG@20: 0.0501                     | 00:33    | k=32, phi=1.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.0824, NDCG@20: 0.0501                     | 02:05    | k=64, phi=0.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.0849, NDCG@20: 0.0515                     | 00:35    | k=64, phi=0.25
+PGSP       | yelp2018             | (Val) Recall@20: 0.0858, NDCG@20: 0.052                      | 00:35    | k=64, phi=0.5
+PGSP       | yelp2018             | (Val) Recall@20: 0.0851, NDCG@20: 0.0516                     | 00:35    | k=64, phi=0.75
+PGSP       | yelp2018             | (Val) Recall@20: 0.0825, NDCG@20: 0.0501                     | 00:34    | k=64, phi=1.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.094, NDCG@20: 0.0575                      | 03:30    | k=128, phi=0.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.0947, NDCG@20: 0.0578                     | 00:33    | k=128, phi=0.25
+PGSP       | yelp2018             | (Val) Recall@20: 0.0935, NDCG@20: 0.0572                     | 00:34    | k=128, phi=0.5
+PGSP       | yelp2018             | (Val) Recall@20: 0.0899, NDCG@20: 0.0547                     | 00:34    | k=128, phi=0.75
+PGSP       | yelp2018             | (Val) Recall@20: 0.0825, NDCG@20: 0.0501                     | 00:34    | k=128, phi=1.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.1025, NDCG@20: 0.063                      | 06:57    | k=256, phi=0.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.1022, NDCG@20: 0.0627                     | 00:35    | k=256, phi=0.25
+PGSP       | yelp2018             | (Val) Recall@20: 0.0993, NDCG@20: 0.0609                     | 00:34    | k=256, phi=0.5
+PGSP       | yelp2018             | (Val) Recall@20: 0.0939, NDCG@20: 0.0572                     | 00:35    | k=256, phi=0.75
+PGSP       | yelp2018             | (Val) Recall@20: 0.0825, NDCG@20: 0.0501                     | 00:35    | k=256, phi=1.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.1058, NDCG@20: 0.0655                     | 14:28    | k=512, phi=0.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.1047, NDCG@20: 0.0648                     | 00:35    | k=512, phi=0.25
+PGSP       | yelp2018             | (Val) Recall@20: 0.1021, NDCG@20: 0.0629                     | 00:34    | k=512, phi=0.5
+PGSP       | yelp2018             | (Val) Recall@20: 0.096, NDCG@20: 0.0586                      | 00:34    | k=512, phi=0.75
+PGSP       | yelp2018             | (Val) Recall@20: 0.0825, NDCG@20: 0.0501                     | 00:34    | k=512, phi=1.0
+PGSP       | yelp2018             | (Val) TIMEOUT                                                | 31:01    | k=1024, phi=0.0
+PGSP       | yelp2018             | (Val) Recall@20: 0.1036, NDCG@20: 0.0649                     | 00:34    | k=1024, phi=0.25
+PGSP       | yelp2018             | (Val) Recall@20: 0.1017, NDCG@20: 0.0636                     | 00:35    | k=1024, phi=0.5
+PGSP       | yelp2018             | (Val) Recall@20: 0.0959, NDCG@20: 0.0591                     | 00:34    | k=1024, phi=0.75
+PGSP       | yelp2018             | (Val) Recall@20: 0.0825, NDCG@20: 0.0501                     | 00:34    | k=1024, phi=1.0
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0415, NDCG@20: 0.0229                     | 01:16    | alpha=0.1, power=0.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0, NDCG@20: 0                               | 11:13    | alpha=0.1, power=0.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.1, power=0.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0224, NDCG@20: 0.0128                     | 01:14    | alpha=0.1, power=1.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0312, NDCG@20: 0.018                      | 11:15    | alpha=0.1, power=1.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.1, power=1.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.019, NDCG@20: 0.0113                      | 01:13    | alpha=0.1, power=1.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0195, NDCG@20: 0.0116                     | 11:10    | alpha=0.1, power=1.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.1, power=1.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.017, NDCG@20: 0.0104                      | 01:12    | alpha=0.1, power=2.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0171, NDCG@20: 0.0104                     | 11:17    | alpha=0.1, power=2.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.1, power=2.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.1004, NDCG@20: 0.0627                     | 01:14    | alpha=0.3, power=0.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0, NDCG@20: 0                               | 11:24    | alpha=0.3, power=0.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.3, power=0.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0862, NDCG@20: 0.0526                     | 01:15    | alpha=0.3, power=1.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0753, NDCG@20: 0.0456                     | 11:25    | alpha=0.3, power=1.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.3, power=1.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0532, NDCG@20: 0.0307                     | 01:15    | alpha=0.3, power=1.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0535, NDCG@20: 0.0309                     | 11:22    | alpha=0.3, power=1.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.3, power=1.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.034, NDCG@20: 0.019                       | 01:14    | alpha=0.3, power=2.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0341, NDCG@20: 0.019                      | 11:10    | alpha=0.3, power=2.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.3, power=2.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0985, NDCG@20: 0.0609                     | 01:15    | alpha=0.5, power=0.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0, NDCG@20: 0                               | 11:18    | alpha=0.5, power=0.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.5, power=0.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.102, NDCG@20: 0.0631                      | 01:14    | alpha=0.5, power=1.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.1031, NDCG@20: 0.0648                     | 11:13    | alpha=0.5, power=1.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.5, power=1.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0933, NDCG@20: 0.0578                     | 01:15    | alpha=0.5, power=1.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0934, NDCG@20: 0.0578                     | 11:17    | alpha=0.5, power=1.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.5, power=1.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0794, NDCG@20: 0.0482                     | 01:16    | alpha=0.5, power=2.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0795, NDCG@20: 0.0482                     | 11:18    | alpha=0.5, power=2.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.5, power=2.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0879, NDCG@20: 0.0537                     | 01:13    | alpha=0.7, power=0.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0, NDCG@20: 0                               | 11:18    | alpha=0.7, power=0.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.7, power=0.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0884, NDCG@20: 0.054                      | 01:15    | alpha=0.7, power=1.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.1032, NDCG@20: 0.0641                     | 11:14    | alpha=0.7, power=1.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.7, power=1.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0853, NDCG@20: 0.0518                     | 01:28    | alpha=0.7, power=1.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.086, NDCG@20: 0.0523                      | 11:40    | alpha=0.7, power=1.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.7, power=1.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.081, NDCG@20: 0.0489                      | 01:14    | alpha=0.7, power=2.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0812, NDCG@20: 0.049                      | 11:12    | alpha=0.7, power=2.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.7, power=2.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0792, NDCG@20: 0.048                      | 01:13    | alpha=0.9, power=0.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0, NDCG@20: 0                               | 10:43    | alpha=0.9, power=0.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.9, power=0.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0764, NDCG@20: 0.0462                     | 01:14    | alpha=0.9, power=1.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0752, NDCG@20: 0.0475                     | 10:32    | alpha=0.9, power=1.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.9, power=1.0, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0719, NDCG@20: 0.0432                     | 01:13    | alpha=0.9, power=1.5, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0772, NDCG@20: 0.0469                     | 10:36    | alpha=0.9, power=1.5, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.9, power=1.5, filter=3
+TurboCF    | yelp2018             | (Val) Recall@20: 0.068, NDCG@20: 0.0406                      | 01:15    | alpha=0.9, power=2.0, filter=1
+TurboCF    | yelp2018             | (Val) Recall@20: 0.0694, NDCG@20: 0.0417                     | 10:58    | alpha=0.9, power=2.0, filter=2
+TurboCF    | yelp2018             | (Val) TIMEOUT                                                | 31:01    | alpha=0.9, power=2.0, filter=3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0889, NDCG@20: 0.0546                     | 01:09    | k=32, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0948, NDCG@20: 0.0584                     | 01:09    | k=64, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0999, NDCG@20: 0.0615                     | 01:09    | k=128, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1027, NDCG@20: 0.0635                     | 01:09    | k=256, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0998, NDCG@20: 0.0618                     | 01:12    | k=512, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+SGFCF      | yelp2018             | (Val) Recall@20: 0.092, NDCG@20: 0.0573                      | 01:15    | k=1024, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0841, NDCG@20: 0.0516                     | 01:08    | k=32, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0922, NDCG@20: 0.0568                     | 01:07    | k=64, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1008, NDCG@20: 0.0628                     | 01:09    | k=128, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1073, NDCG@20: 0.0671                     | 01:08    | k=256, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1085, NDCG@20: 0.0683                     | 01:11    | k=512, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1089, NDCG@20: 0.0684                     | 01:16    | k=1024, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0526, NDCG@20: 0.0322                     | 01:07    | k=32, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0527, NDCG@20: 0.0323                     | 01:07    | k=64, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0527, NDCG@20: 0.0323                     | 01:08    | k=128, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0527, NDCG@20: 0.0323                     | 01:10    | k=256, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0527, NDCG@20: 0.0323                     | 01:11    | k=512, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0527, NDCG@20: 0.0323                     | 01:14    | k=1024, beta_1=4.3, beta_2=5.1, alpha=2.3, eps=0.5, gamma=0.05
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0795, NDCG@20: 0.0489                     | 01:07    | k=32, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0906, NDCG@20: 0.0556                     | 01:07    | k=64, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1035, NDCG@20: 0.0639                     | 01:08    | k=128, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1132, NDCG@20: 0.0707                     | 01:08    | k=256, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1174, NDCG@20: 0.0737                     | 01:11    | k=512, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1146, NDCG@20: 0.0725                     | 01:14    | k=1024, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0641, NDCG@20: 0.0393                     | 01:07    | k=32, beta_1=2.0, beta_2=2.4, alpha=0.0, eps=0.37, gamma=0.07
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0674, NDCG@20: 0.0413                     | 01:08    | k=64, beta_1=2.0, beta_2=2.4, alpha=0.0, eps=0.37, gamma=0.07
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0701, NDCG@20: 0.0431                     | 01:08    | k=128, beta_1=2.0, beta_2=2.4, alpha=0.0, eps=0.37, gamma=0.07
+SGFCF      | yelp2018             | (Val) Recall@20: 0.072, NDCG@20: 0.0443                      | 01:09    | k=256, beta_1=2.0, beta_2=2.4, alpha=0.0, eps=0.37, gamma=0.07
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0727, NDCG@20: 0.0447                     | 01:10    | k=512, beta_1=2.0, beta_2=2.4, alpha=0.0, eps=0.37, gamma=0.07
+SGFCF      | yelp2018             | (Val) Recall@20: 0.073, NDCG@20: 0.0449                      | 01:15    | k=1024, beta_1=2.0, beta_2=2.4, alpha=0.0, eps=0.37, gamma=0.07
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0833, NDCG@20: 0.0513                     | 01:08    | k=32, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0925, NDCG@20: 0.057                      | 01:08    | k=64, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1023, NDCG@20: 0.0637                     | 01:10    | k=128, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1114, NDCG@20: 0.0699                     | 01:09    | k=256, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1152, NDCG@20: 0.0725                     | 01:11    | k=512, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.1148, NDCG@20: 0.0728                     | 01:14    | k=1024, beta_1=1.0, beta_2=1.3, alpha=19.0, eps=0.5, gamma=0.5
+SGFCF      | yelp2018             | (Val) Recall@20: 0.054, NDCG@20: 0.0329                      | 01:06    | k=32, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0544, NDCG@20: 0.0332                     | 01:08    | k=64, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0546, NDCG@20: 0.0334                     | 01:08    | k=128, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0546, NDCG@20: 0.0334                     | 01:09    | k=256, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0547, NDCG@20: 0.0334                     | 01:11    | k=512, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0547, NDCG@20: 0.0334                     | 01:14    | k=1024, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0866, NDCG@20: 0.0529                     | 01:07    | k=32, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
