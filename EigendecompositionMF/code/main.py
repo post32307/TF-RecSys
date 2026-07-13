@@ -63,7 +63,7 @@ try:
     from scipy.sparse.linalg import eigs
     from scipy.sparse.linalg import svds
 
-    plot_true = 0
+    plot_true = 1
     #   0: skip eigenvalue plotting and continue to the model/search code
     #   1: plot real eigenvalues, save to plots/, and terminate with sys.exit()
     if plot_true not in (0, 1):
