@@ -23,7 +23,7 @@ __pycache__/
 **/code/Results/**
 **/LastFM is a very small dataset**
 
-**/LightGCN-PyTorch/results/**
+
 **/LightGCN-PyTorch/code/checkpoints/**
 **/LightGCN-PyTorch/code/runs/**
 **/LightGCN-PyTorch/code/__pycache__/**
