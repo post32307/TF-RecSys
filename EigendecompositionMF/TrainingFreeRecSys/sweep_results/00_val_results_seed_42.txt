@@ -2185,3 +2185,14 @@ SGFCF      | yelp2018             | (Val) Recall@20: 0.0546, NDCG@20: 0.0334    
 SGFCF      | yelp2018             | (Val) Recall@20: 0.0547, NDCG@20: 0.0334                     | 01:11    | k=512, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
 SGFCF      | yelp2018             | (Val) Recall@20: 0.0547, NDCG@20: 0.0334                     | 01:14    | k=1024, beta_1=2.0, beta_2=5.0, alpha=5.3, eps=0.5, gamma=0.025
 SGFCF      | yelp2018             | (Val) Recall@20: 0.0866, NDCG@20: 0.0529                     | 01:07    | k=32, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0895, NDCG@20: 0.0547                     | 01:10    | k=64, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0924, NDCG@20: 0.0569                     | 01:07    | k=128, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0953, NDCG@20: 0.0589                     | 01:09    | k=256, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0963, NDCG@20: 0.0596                     | 01:11    | k=512, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0966, NDCG@20: 0.0596                     | 01:17    | k=1024, beta_1=0.3, beta_2=2.5, alpha=0.0, eps=0.34, gamma=1.6
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0493, NDCG@20: 0.0302                     | 01:07    | k=32, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0495, NDCG@20: 0.0303                     | 01:08    | k=64, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0495, NDCG@20: 0.0303                     | 01:07    | k=128, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0495, NDCG@20: 0.0303                     | 01:09    | k=256, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0494, NDCG@20: 0.0303                     | 01:11    | k=512, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
+SGFCF      | yelp2018             | (Val) Recall@20: 0.0495, NDCG@20: 0.0303                     | 01:15    | k=1024, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025

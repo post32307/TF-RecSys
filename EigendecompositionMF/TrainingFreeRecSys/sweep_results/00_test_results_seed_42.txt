@@ -77,3 +77,10 @@ GF-CF      | gowalla              | (Test) Recall@20: 0.229012, NDCG@20: 0.13204
 PGSP       | gowalla              | (Test) Recall@20: 0.2233, NDCG@20: 0.1283                    | 00:29    | k=1024, phi=0.5
 TurboCF    | gowalla              | (Test) Recall@20: 0.2194, NDCG@20: 0.1263                    | 01:05    | alpha=0.5, power=0.5, filter=1
 SGFCF      | gowalla              | (Test) Recall@20: 0.2341, NDCG@20: 0.1368                    | 00:51    | k=1024, beta_1=0.7, beta_2=1.1, alpha=0.0, eps=0.28, gamma=1.5
+
+BSPM       | yelp2018             | (Test) Recall@20: 0.109357, NDCG@20: 0.0683359               | 05:06    | solver_shr=euler, K_s=1, T_s=1.2, final_sharpening=True, t_point_combination=True, idl_beta=0.3, factor_dim=512
+EASE       | yelp2018             | (Test) Recall@20: 0.1018, NDCG@20: 0.0645                    | 07:48    | lambda_=200
+GF-CF      | yelp2018             | (Test) Recall@20: 0.106143, NDCG@20: 0.0658764               | 03:45    | k=512
+PGSP       | yelp2018             | (Test) Recall@20: 0.103, NDCG@20: 0.0639                     | 00:39    | k=512, phi=0.0
+TurboCF    | yelp2018             | (Test) Recall@20: 0.1024, NDCG@20: 0.0635                    | 11:03    | alpha=0.7, power=1.0, filter=2
+SGFCF      | yelp2018             | (Test) Recall@20: 0.1159, NDCG@20: 0.0726                    | 01:11    | k=512, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3

@@ -63,11 +63,22 @@ try:
     from scipy.sparse.linalg import eigs
     from scipy.sparse.linalg import svds
 
-    plot_true = 1
+
+
+    plot_true = 0
     #   0: skip eigenvalue plotting and continue to the model/search code
     #   1: plot real eigenvalues, save to plots/, and terminate with sys.exit()
     if plot_true not in (0, 1):
         raise ValueError("plot_true must be 0 or 1.")
+    
+    val_true = 1
+    #   0: no hyperparameter search; test default params on test.txt
+    #   1: train on train.txt, search on val.txt, test on test.txt
+    #   2: train on train.txt, search on test.txt, test on test.txt
+    if val_true not in (0, 1, 2):
+        raise ValueError("val_true must be 0, 1, or 2.")
+
+
 
     if plot_true == 1:
         # ---------------------------------------------------------
@@ -121,16 +132,12 @@ try:
             plot_eigs = eigs(plot_x_norm, k=plot_k, which="LR", return_eigenvectors=False)
             plot_asym_eigenvalues.append((plot_tau, plot_delta, plot_alpha, plot_beta, plot_eigs))
 
-        plot_sgfcf_param_pairs = [
-            (0.0, 0.5),
-            (0.0, 0.28),
-            (0.0, 0.37),
-            (0.0, 0.34),
-            (2.3, 0.5),
-            (4.8, 0.5),
-            (5.3, 0.5),
-            (19.0, 0.5),
-        ]
+        plot_sgfcf_alpha_space = [0.0, 1.0, 5.0, 10.0, 20.0]
+        plot_sgfcf_eps_space = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+        plot_sgfcf_param_pairs = list(itertools.product(
+            plot_sgfcf_alpha_space,
+            plot_sgfcf_eps_space,
+        ))
         plot_r = plot_model.R.astype(np.float32).tocsr()
         plot_user_degree = np.array(plot_r.sum(axis=1)).flatten()
         plot_item_degree = np.array(plot_r.sum(axis=0)).flatten()
@@ -176,17 +183,62 @@ try:
             return np.cumsum(energy) / total_energy
 
         fig, axes = plt.subplots(2, 3, figsize=(21, 12))
+        plot_tau_colors = {
+            plot_tau: plt.get_cmap("tab10")(plot_idx % 10)
+            for plot_idx, plot_tau in enumerate(plot_tau_space)
+        }
+        plot_delta_markers = {
+            plot_delta: plot_marker
+            for plot_delta, plot_marker in zip(
+                plot_delta_space,
+                ["o", "x", "+", "o"],
+            )
+        }
         for plot_tau, plot_delta, plot_alpha, plot_beta, plot_eigs in plot_asym_eigenvalues:
             plot_label = (
                 f"tau={plot_tau}, delta={plot_delta} "
                 f"(a={plot_alpha:.2f}, b={plot_beta:.2f})"
             )
+            plot_color = plot_tau_colors[plot_tau]
+            plot_marker = plot_delta_markers[plot_delta]
+            plot_markerfacecolor = "none"
+            plot_markersize = 8 if plot_delta == plot_delta_space[3] else 4.5
             sorted_real = np.sort(plot_eigs.real)[::-1]
             norm_vals = normalized_spectrum(plot_eigs)
             energy_vals = energy_curve(plot_eigs)
-            axes[0, 0].plot(np.arange(1, len(sorted_real) + 1), sorted_real, marker=".", linewidth=1, label=plot_label)
-            axes[0, 1].plot(np.arange(1, len(norm_vals) + 1), norm_vals, marker=".", linewidth=1, label=plot_label)
-            axes[0, 2].plot(np.arange(1, len(energy_vals) + 1), energy_vals, marker=".", linewidth=1, label=plot_label)
+            axes[0, 0].plot(
+                np.arange(1, len(sorted_real) + 1),
+                sorted_real,
+                color=plot_color,
+                marker=plot_marker,
+                markerfacecolor=plot_markerfacecolor,
+                markeredgewidth=1.1,
+                markersize=plot_markersize,
+                linewidth=1,
+                label=plot_label,
+            )
+            axes[0, 1].plot(
+                np.arange(1, len(norm_vals) + 1),
+                norm_vals,
+                color=plot_color,
+                marker=plot_marker,
+                markerfacecolor=plot_markerfacecolor,
+                markeredgewidth=1.1,
+                markersize=plot_markersize,
+                linewidth=1,
+                label=plot_label,
+            )
+            axes[0, 2].plot(
+                np.arange(1, len(energy_vals) + 1),
+                energy_vals,
+                color=plot_color,
+                marker=plot_marker,
+                markerfacecolor=plot_markerfacecolor,
+                markeredgewidth=1.1,
+                markersize=plot_markersize,
+                linewidth=1,
+                label=plot_label,
+            )
 
         for plot_sgfcf_alpha, plot_sgfcf_eps, plot_eigs in plot_sgfcf_eigenvalues:
             plot_label = f"alpha={plot_sgfcf_alpha}, eps={plot_sgfcf_eps}"
@@ -231,18 +283,12 @@ try:
     )
     dataset_name = world.dataset
     dataset_path = os.path.join(data_root, dataset_name)
+    
+    if val_true == 1 and not os.path.isfile(os.path.join(dataset_path, "val.txt")):
+        raise FileNotFoundError(f"Validation file not found: {os.path.join(dataset_path, 'val.txt')}")
 
     if not os.path.isdir(dataset_path):
         raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
-
-    val_true = 2
-    #   0: no hyperparameter search; test default params on test.txt
-    #   1: train on train.txt, search on val.txt, test on test.txt
-    #   2: train on train.txt, search on test.txt, test on test.txt
-    if val_true not in (0, 1, 2):
-        raise ValueError("val_true must be 0, 1, or 2.")
-    if val_true == 1 and not os.path.isfile(os.path.join(dataset_path, "val.txt")):
-        raise FileNotFoundError(f"Validation file not found: {os.path.join(dataset_path, 'val.txt')}")
 
     max_k = world.config["k"]
     default_params = {
@@ -299,6 +345,35 @@ try:
 
     fixed_asym_alpha = 0.2
     fixed_asym_beta = 0.4
+    bpr_renewal_coeff_space = [0.0, 0.05, 0.1, 0.2, 0.5]
+    bpr_hard_negative_k = max(world.topks)
+    default_bpr_renewal_params = {
+        "mqqt_coeff": 0.0,
+        "pptm_coeff": 0.0,
+        "hard_negative_k": bpr_hard_negative_k,
+    }
+    bpr_renewal_variant_labels = {
+        "plain": "Baseline Asymmetric Eigenvector: U_R U_R^T",
+        "lambda": "Baseline Asymmetric Eigenvector: U_R Lambda U_R^T",
+        "lambda2": "Baseline Asymmetric Eigenvector: U_R Lambda^2 U_R^T",
+    }
+
+    def default_bpr_renewal_params_by_variant():
+        return {
+            variant_name: dict(default_bpr_renewal_params)
+            for variant_name in bpr_renewal_variant_labels
+        }
+
+    def normalize_bpr_renewal_params_by_variant(params_by_variant):
+        if "mqqt_coeff" in params_by_variant and "pptm_coeff" in params_by_variant:
+            return {
+                variant_name: dict(params_by_variant)
+                for variant_name in bpr_renewal_variant_labels
+            }
+        return {
+            variant_name: dict(params_by_variant.get(variant_name, default_bpr_renewal_params))
+            for variant_name in bpr_renewal_variant_labels
+        }
 
     def alpha_beta_to_tau_delta(norm_alpha, norm_beta):
         return norm_alpha + norm_beta, (norm_beta - norm_alpha) / 2.0
@@ -429,6 +504,251 @@ try:
         results["ndcg"] /= float(user_count)
         return results
 
+    def row_normalize_sparse(mat):
+        mat = mat.astype(np.float32).tocsr()
+        row_sum = np.array(mat.sum(axis=1)).flatten()
+        inv_row_sum = np.zeros_like(row_sum, dtype=np.float32)
+        nonzero_rows = row_sum > 0
+        inv_row_sum[nonzero_rows] = 1.0 / row_sum[nonzero_rows]
+        return sp.diags(inv_row_sum).dot(mat).astype(np.float32).tocsr()
+
+    def build_hard_negative_matrix(current_model, current_dataset, user_factors, item_factors, hard_negative_k):
+        hard_negative_k = max(1, min(int(hard_negative_k), current_model.m_items))
+        batch_size = world.config["test_u_batch_size"]
+        rows = []
+        cols = []
+
+        with torch.no_grad():
+            for batch_users in helpers.minibatch(list(range(current_model.n_users)), batch_size=batch_size):
+                batch_users_gpu = torch.Tensor(batch_users).long().to(world.device)
+                rating = user_factors[batch_users_gpu, :] @ item_factors.t()
+                all_pos = current_dataset.getUserPosItems(batch_users)
+
+                exclude_index = []
+                exclude_items = []
+                for range_i, items_pos in enumerate(all_pos):
+                    exclude_index.extend([range_i] * len(items_pos))
+                    exclude_items.extend(items_pos)
+                if exclude_index:
+                    rating[exclude_index, exclude_items] = -(1 << 10)
+
+                _, hard_items = torch.topk(rating, k=hard_negative_k)
+                hard_items = hard_items.cpu().numpy()
+                for range_i, user_id in enumerate(batch_users):
+                    pos_set = set(all_pos[range_i])
+                    max_candidates = current_model.m_items - len(pos_set)
+                    if max_candidates <= 0:
+                        continue
+                    selected = []
+                    for item_id in hard_items[range_i]:
+                        item_id = int(item_id)
+                        if item_id not in pos_set:
+                            selected.append(item_id)
+                        if len(selected) >= min(hard_negative_k, max_candidates):
+                            break
+                    rows.extend([user_id] * len(selected))
+                    cols.extend(selected)
+
+                del rating, hard_items
+
+        data = np.ones(len(rows), dtype=np.float32)
+        return sp.csr_matrix(
+            (data, (rows, cols)),
+            shape=(current_model.n_users, current_model.m_items),
+            dtype=np.float32,
+        )
+
+    def prepare_bpr_renewal_terms(current_model, current_dataset, user_factors, item_factors, hard_negative_k):
+        fprint(f"Constructing hard negatives for one-step BPR renewal, top_k={hard_negative_k}.")
+        hard_negative_matrix = build_hard_negative_matrix(
+            current_model,
+            current_dataset,
+            user_factors,
+            item_factors,
+            hard_negative_k,
+        )
+        contrast_matrix = (
+            row_normalize_sparse(current_model.R)
+            - row_normalize_sparse(hard_negative_matrix)
+        ).astype(np.float32).tocsr()
+
+        user_factors_np = user_factors.detach().cpu().numpy().astype(np.float32)
+        item_factors_np = item_factors.detach().cpu().numpy().astype(np.float32)
+        p_t_m = contrast_matrix.T.dot(user_factors_np).T.astype(np.float32)
+        p_t_m = torch.as_tensor(p_t_m, dtype=torch.float32, device=world.device)
+        return contrast_matrix, user_factors_np, item_factors_np, p_t_m
+
+    def evaluate_bpr_renewal_params(
+        current_model,
+        current_dataset,
+        user_factors,
+        item_factors,
+        bpr_renewal_params,
+        renewal_terms=None,
+        eval_batches=None,
+        user_count=None,
+        desc="BPR Renewal Eval",
+    ):
+        hard_negative_k = int(bpr_renewal_params.get("hard_negative_k", bpr_hard_negative_k))
+        mqqt_coeff = bpr_renewal_params["mqqt_coeff"]
+        pptm_coeff = bpr_renewal_params["pptm_coeff"]
+        if np.isclose(mqqt_coeff, 0.0) and np.isclose(pptm_coeff, 0.0):
+            return test_factorized_rating(
+                current_model,
+                current_dataset,
+                user_factors,
+                item_factors,
+                eval_batches,
+                user_count,
+            )
+
+        if renewal_terms is None:
+            renewal_terms = prepare_bpr_renewal_terms(
+                current_model,
+                current_dataset,
+                user_factors,
+                item_factors,
+                hard_negative_k,
+            )
+        contrast_matrix, _, item_factors_np, p_t_m = renewal_terms
+        item_factors_t = item_factors.t()
+
+        results = {
+            "precision": np.zeros(len(world.topks)),
+            "recall": np.zeros(len(world.topks)),
+            "ndcg": np.zeros(len(world.topks)),
+        }
+        if eval_batches is None or user_count is None:
+            eval_batches, user_count = prepare_eval_batches(current_dataset)
+        if user_count == 0:
+            return results
+
+        max_k_eval = max(world.topks)
+        with torch.no_grad():
+            with tqdm(total=len(eval_batches), desc=desc, unit="batch") as pbar:
+                for batch_users, all_pos, ground_true, batch_users_gpu in eval_batches:
+                    batch_users_np = np.asarray(batch_users, dtype=np.int64)
+                    base_rating = user_factors[batch_users_gpu, :] @ item_factors_t
+                    m_q = contrast_matrix[batch_users_np].dot(item_factors_np).astype(np.float32)
+                    item_side_term = torch.as_tensor(m_q, dtype=torch.float32, device=world.device) @ item_factors_t
+                    user_side_term = user_factors[batch_users_gpu, :] @ p_t_m
+                    rating = (
+                        base_rating
+                        + mqqt_coeff * item_side_term
+                        + pptm_coeff * user_side_term
+                    )
+
+                    exclude_index = []
+                    exclude_items = []
+                    for range_i, items_pos in enumerate(all_pos):
+                        exclude_index.extend([range_i] * len(items_pos))
+                        exclude_items.extend(items_pos)
+                    if exclude_index:
+                        rating[exclude_index, exclude_items] = -(1 << 10)
+
+                    _, rating_k = torch.topk(rating, k=max_k_eval)
+                    batch_result = current_model.test_one_batch((rating_k.cpu(), ground_true))
+                    results["recall"] += batch_result["recall"]
+                    results["precision"] += batch_result["precision"]
+                    results["ndcg"] += batch_result["ndcg"]
+                    del base_rating, item_side_term, user_side_term, rating, rating_k
+                    pbar.update(1)
+
+        results["recall"] /= float(user_count)
+        results["precision"] /= float(user_count)
+        results["ndcg"] /= float(user_count)
+        return results
+
+    def search_bpr_renewal_coefficients(current_model, current_dataset, user_factors, item_factors):
+        eval_batches, user_count = prepare_eval_batches(current_dataset)
+        param_pairs = list(itertools.product(bpr_renewal_coeff_space, bpr_renewal_coeff_space))
+        renewal_terms = prepare_bpr_renewal_terms(
+            current_model,
+            current_dataset,
+            user_factors,
+            item_factors,
+            bpr_hard_negative_k,
+        )
+        contrast_matrix, _, item_factors_np, p_t_m = renewal_terms
+        item_factors_t = item_factors.t()
+        results_by_params = {
+            param_pair: {
+                "precision": np.zeros(len(world.topks)),
+                "recall": np.zeros(len(world.topks)),
+                "ndcg": np.zeros(len(world.topks)),
+            }
+            for param_pair in param_pairs
+        }
+        max_k_eval = max(world.topks)
+
+        if user_count == 0:
+            empty_results = {
+                "precision": np.zeros(len(world.topks)),
+                "recall": np.zeros(len(world.topks)),
+                "ndcg": np.zeros(len(world.topks)),
+            }
+            return {
+                "mqqt_coeff": 0.0,
+                "pptm_coeff": 0.0,
+                "hard_negative_k": bpr_hard_negative_k,
+            }, empty_results, 0.0
+
+        with torch.no_grad():
+            with tqdm(total=len(eval_batches) * len(param_pairs), desc="BPR Renewal Coeff Search", unit="cfg") as pbar:
+                for batch_users, all_pos, ground_true, batch_users_gpu in eval_batches:
+                    batch_users_np = np.asarray(batch_users, dtype=np.int64)
+                    base_rating = user_factors[batch_users_gpu, :] @ item_factors_t
+
+                    m_q = contrast_matrix[batch_users_np].dot(item_factors_np).astype(np.float32)
+                    item_side_term = torch.as_tensor(m_q, dtype=torch.float32, device=world.device) @ item_factors_t
+                    user_side_term = user_factors[batch_users_gpu, :] @ p_t_m
+
+                    exclude_index = []
+                    exclude_items = []
+                    for range_i, items_pos in enumerate(all_pos):
+                        exclude_index.extend([range_i] * len(items_pos))
+                        exclude_items.extend(items_pos)
+
+                    for mqqt_coeff, pptm_coeff in param_pairs:
+                        rating = (
+                            base_rating
+                            + mqqt_coeff * item_side_term
+                            + pptm_coeff * user_side_term
+                        )
+                        if exclude_index:
+                            rating[exclude_index, exclude_items] = -(1 << 10)
+
+                        _, rating_k = torch.topk(rating, k=max_k_eval)
+                        batch_result = current_model.test_one_batch((rating_k.cpu(), ground_true))
+                        current_results = results_by_params[(mqqt_coeff, pptm_coeff)]
+                        current_results["recall"] += batch_result["recall"]
+                        current_results["precision"] += batch_result["precision"]
+                        current_results["ndcg"] += batch_result["ndcg"]
+                        del rating, rating_k
+                        pbar.update(1)
+
+                    del base_rating, item_side_term, user_side_term
+
+        best_params = None
+        best_results = None
+        best_score = -1.0
+        for mqqt_coeff, pptm_coeff in param_pairs:
+            current_results = results_by_params[(mqqt_coeff, pptm_coeff)]
+            current_results["recall"] /= float(user_count)
+            current_results["precision"] /= float(user_count)
+            current_results["ndcg"] /= float(user_count)
+            score = tuning_score(current_results)
+            if best_results is None or score > best_score:
+                best_params = {
+                    "mqqt_coeff": mqqt_coeff,
+                    "pptm_coeff": pptm_coeff,
+                    "hard_negative_k": bpr_hard_negative_k,
+                }
+                best_results = current_results
+                best_score = score
+
+        return best_params, best_results, best_score
+
     def tuning_score(results):
         # return results["recall"][0] + results["ndcg"][0]
         return results["recall"][0]
@@ -549,6 +869,40 @@ try:
         eig_filter_values = torch.abs(eigs[:current_k])
         eig_filter_values = eig_filter_values / torch.clamp(torch.max(eig_filter_values), min=1e-12)
         return U_R[:, :current_k], eigs[:current_k], eig_filter_values
+
+    def build_fixed_asym_lambda2_factors(current_model, k):
+        current_k = safe_rank(current_model, k)
+        original_k = current_model.k
+        current_model.k = current_k
+        rowsum = np.array(current_model.A.sum(axis=1)).flatten()
+        rowsum[rowsum == 0] = 1e-9
+        current_model.D_inv = sp.diags(1.0 / rowsum)
+        X_norm = current_model.getNormAdj(
+            current_model.A,
+            current_model.D_inv,
+            alpha1=fixed_asym_alpha,
+            alpha2=fixed_asym_beta,
+        )
+        _, U_R, eigs = current_model.Eigendecomposition_Asym(X_norm)
+        current_model.k = original_k
+        U_R = U_R[:, :current_k]
+        eigs = eigs[:current_k]
+        user_U = U_R[:current_model.n_users, :]
+        item_U = U_R[current_model.n_users:, :]
+        lambda2_user_factors = user_U * (eigs ** 2).unsqueeze(0)
+        lambda2_item_factors = item_U
+        return user_U, item_U, eigs, lambda2_user_factors, lambda2_item_factors
+
+    def build_fixed_asym_bpr_renewal_variants(current_model, k):
+        user_U, item_U, eigs, lambda2_user_factors, lambda2_item_factors = build_fixed_asym_lambda2_factors(
+            current_model,
+            k,
+        )
+        return {
+            "plain": (user_U, item_U),
+            "lambda": (user_U * eigs.unsqueeze(0), item_U),
+            "lambda2": (lambda2_user_factors, lambda2_item_factors),
+        }
 
     def build_individual_filter_factors(current_model, params, homo_user, homo_item, component_cache):
         cache_key = (params["tau"], params["delta"], params["k"])
@@ -853,6 +1207,28 @@ try:
 
         return best_params, best_results, best_score
 
+    def search_bpr_renewal_hyperparameters(search_model, search_dataset, k):
+        factor_variants = build_fixed_asym_bpr_renewal_variants(
+            search_model,
+            k,
+        )
+        best_params_by_variant = {}
+        best_results_by_variant = {}
+        best_scores_by_variant = {}
+        for variant_name in ("plain", "lambda", "lambda2"):
+            user_factors, item_factors = factor_variants[variant_name]
+            fprint(f"Searching BPR-renewal coefficients for {bpr_renewal_variant_labels[variant_name]}.")
+            best_params, best_results, best_score = search_bpr_renewal_coefficients(
+                search_model,
+                search_dataset,
+                user_factors,
+                item_factors,
+            )
+            best_params_by_variant[variant_name] = best_params
+            best_results_by_variant[variant_name] = best_results
+            best_scores_by_variant[variant_name] = best_score
+        return best_params_by_variant, best_results_by_variant, best_scores_by_variant
+
     def run_final_tests(test_dataset, individual_params, sgfcf_params, quantized_sgfcf_params, nonhomophily_sgfcf_params):
         test_model = model.PSEmodel(world.config, test_dataset)
         homo_user, homo_item = compute_homophily_ratios(test_model)
@@ -890,7 +1266,10 @@ try:
         )
         return individual_results, sgfcf_results, quantized_sgfcf_results, nonhomophily_sgfcf_results, test_model
 
-    def run_baseline_tests(test_model, test_dataset, k):
+    def run_baseline_tests(test_model, test_dataset, k, bpr_renewal_params_by_variant):
+        bpr_renewal_params_by_variant = normalize_bpr_renewal_params_by_variant(
+            bpr_renewal_params_by_variant
+        )
         baseline_alpha = fixed_asym_alpha
         baseline_beta = fixed_asym_beta
         baseline_tau, baseline_delta = alpha_beta_to_tau_delta(baseline_alpha, baseline_beta)
@@ -905,24 +1284,15 @@ try:
             f"delta=(beta-alpha)/2={baseline_delta}"
         )
 
-        current_k = safe_rank(test_model, k)
-        original_k = test_model.k
-        test_model.k = current_k
-        rowsum = np.array(test_model.A.sum(axis=1)).flatten()
-        rowsum[rowsum == 0] = 1e-9
-        test_model.D_inv = sp.diags(1.0 / rowsum)
-        X_norm = test_model.getNormAdj(
-            test_model.A,
-            test_model.D_inv,
-            alpha1=baseline_alpha,
-            alpha2=baseline_beta,
+        user_U, item_U, eigs, lambda2_user_factors, lambda2_item_factors = build_fixed_asym_lambda2_factors(
+            test_model,
+            k,
         )
-        _, U_R, eigs = test_model.Eigendecomposition_Asym(X_norm)
-        test_model.k = original_k
-        U_R = U_R[:, :current_k]
-        eigs = eigs[:current_k]
-        user_U = U_R[:test_model.n_users, :]
-        item_U = U_R[test_model.n_users:, :]
+        bpr_factor_variants = {
+            "plain": (user_U, item_U),
+            "lambda": (user_U * eigs.unsqueeze(0), item_U),
+            "lambda2": (lambda2_user_factors, lambda2_item_factors),
+        }
 
         baseline_plain = test_factorized_rating(test_model, test_dataset, user_U, item_U)
         print_metrics("Baseline Asymmetric Eigenvector: U_R U_R^T", baseline_plain)
@@ -938,10 +1308,30 @@ try:
         baseline_lambda2 = test_factorized_rating(
             test_model,
             test_dataset,
-            user_U * (eigs ** 2).unsqueeze(0),
-            item_U,
+            lambda2_user_factors,
+            lambda2_item_factors,
         )
         print_metrics("Baseline Asymmetric Eigenvector: U_R Lambda^2 U_R^T", baseline_lambda2)
+
+        for variant_name in ("plain", "lambda", "lambda2"):
+            bpr_user_factors, bpr_item_factors = bpr_factor_variants[variant_name]
+            bpr_renewal_params = bpr_renewal_params_by_variant.get(
+                variant_name,
+                default_bpr_renewal_params,
+            )
+            bpr_renewal_results = evaluate_bpr_renewal_params(
+                test_model,
+                test_dataset,
+                bpr_user_factors,
+                bpr_item_factors,
+                bpr_renewal_params,
+                desc=f"BPR Renewal Final Eval ({variant_name})",
+            )
+            fprint(f"BPR-renewal coefficients for {bpr_renewal_variant_labels[variant_name]}: {bpr_renewal_params}")
+            print_metrics(
+                f"{bpr_renewal_variant_labels[variant_name]} + One-Step BPR Renewal",
+                bpr_renewal_results,
+            )
 
         R = test_model.R.astype(np.float32).tocsr()
         user_degree = np.array(R.sum(axis=1)).flatten()
@@ -978,16 +1368,20 @@ try:
         fprint(f"Default quantized_SGFCF params: {default_quantized_sgfcf_params}")
         fprint(f"quantized_SGFCF beta set: {beta_quantization_values.detach().cpu().tolist()}")
         fprint(f"Default nonhomophily_SGFCF params: {default_nonhomophily_sgfcf_params}")
+        fprint(f"Default BPR-renewal params: {default_bpr_renewal_params}")
 
         best_sgfcf_params = dict(default_sgfcf_params)
         best_quantized_sgfcf_params = dict(default_quantized_sgfcf_params)
         if val_true == 0:
             best_params = dict(default_params)
             best_nonhomophily_sgfcf_params = dict(default_nonhomophily_sgfcf_params)
+            best_bpr_renewal_params = default_bpr_renewal_params_by_variant()
             best_search_results = None
             best_search_score = None
             best_nonhomophily_sgfcf_search_results = None
             best_nonhomophily_sgfcf_search_score = None
+            best_bpr_renewal_search_results = {}
+            best_bpr_renewal_search_score = {}
             fprint("Skipping hyperparameter search; using default params.")
         else:
             search_eval_file = "val.txt" if val_true == 1 else "test.txt"
@@ -1018,6 +1412,27 @@ try:
             fprint(f"Best nonhomophily_SGFCF search params: {best_nonhomophily_sgfcf_params}")
             fprint(f"Best nonhomophily_SGFCF search score: {best_nonhomophily_sgfcf_search_score:.6f}")
             print_metrics("Best nonhomophily_SGFCF search metrics", best_nonhomophily_sgfcf_search_results)
+
+            fprint()
+            fprint(
+                "Starting BPR-renewal coefficient search "
+                f"on {search_name} dataset ({search_eval_file})."
+            )
+            bpr_renewal_search_start = time.time()
+            best_bpr_renewal_params, best_bpr_renewal_search_results, best_bpr_renewal_search_score = search_bpr_renewal_hyperparameters(
+                search_model,
+                search_dataset,
+                best_params["k"],
+            )
+            bpr_renewal_search_runtime = time.time() - bpr_renewal_search_start
+            fprint(f"BPR-renewal coefficient search complete in {bpr_renewal_search_runtime:.2f} seconds.")
+            for variant_name in ("plain", "lambda", "lambda2"):
+                fprint(f"Best BPR-renewal search params for {bpr_renewal_variant_labels[variant_name]}: {best_bpr_renewal_params[variant_name]}")
+                fprint(f"Best BPR-renewal search score for {bpr_renewal_variant_labels[variant_name]}: {best_bpr_renewal_search_score[variant_name]:.6f}")
+                print_metrics(
+                    f"Best BPR-renewal search metrics for {bpr_renewal_variant_labels[variant_name]}",
+                    best_bpr_renewal_search_results[variant_name],
+                )
 
         # ---------------------------------------------------------
         # 3. Final test
@@ -1055,6 +1470,7 @@ try:
             final_test_model,
             test_dataset,
             best_params["k"],
+            best_bpr_renewal_params,
         )
 
 finally:

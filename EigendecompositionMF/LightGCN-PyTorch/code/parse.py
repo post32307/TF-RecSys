@@ -73,5 +73,16 @@ def parse_args():
                         help="internal flag used by the multi-run scheduler")
     parser.add_argument('--child_result_file', type=str, default=None,
                         help="internal file used by child runs to report ordered results")
+    parser.add_argument('--task_mode', type=str, default="full",
+                        choices=["full", "val", "test"],
+                        help="internal task type used by the multi-run scheduler")
+    parser.add_argument('--task_recdim', type=int, default=None,
+                        help="internal search-task embedding size")
+    parser.add_argument('--task_lr', type=float, default=None,
+                        help="internal search-task learning rate")
+    parser.add_argument('--task_decay', type=float, default=None,
+                        help="internal search-task weight decay")
+    parser.add_argument('--task_layer', type=int, default=None,
+                        help="internal search-task LightGCN layer count")
 
     return parser.parse_args()

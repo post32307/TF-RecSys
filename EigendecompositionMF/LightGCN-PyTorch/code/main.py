@@ -190,6 +190,24 @@ def mode_results_path(mode):
     return results_path()
 
 
+def tmp_results_dir():
+    return join(world.ROOT_PATH, "results", "tmp")
+
+
+def tmp_result_paths():
+    paths = []
+    tmp_dir = tmp_results_dir()
+    if os.path.isdir(tmp_dir):
+        paths.extend(
+            join(tmp_dir, name)
+            for name in sorted(os.listdir(tmp_dir))
+            if name.endswith(".jsonl")
+        )
+    if world.args.child_result_file:
+        paths.append(world.args.child_result_file)
+    return sorted(set(paths))
+
+
 def param_key(params):
     return (
         int(params[0]),
@@ -226,52 +244,87 @@ def parse_params_text(params_text):
     )
 
 
+def parse_result_line(raw_line):
+    parts = [part.strip() for part in raw_line.rstrip("\n").split("|")]
+    if len(parts) < 7 or parts[0] not in ("(val)", "(test)"):
+        return None
+
+    params_part = next((part for part in parts if part.startswith("parameters=")), None)
+    seed_part = next((part for part in parts if part.startswith("seed=")), None)
+    split_part = next((part for part in parts if part.startswith("split_path=")), "")
+    if params_part is None or seed_part is None:
+        return None
+
+    params = parse_params_text(params_part)
+    if params is None:
+        return None
+
+    metrics = {
+        "recall": parse_metric_list(parts[3], "recall"),
+        "precision": parse_metric_list(parts[3], "precision"),
+        "ndcg": parse_metric_list(parts[3], "ndcg"),
+    }
+    if not metrics["recall"]:
+        return None
+
+    return {
+        "mode": parts[0].strip("()"),
+        "dataset": parts[1],
+        "seed": int(seed_part.split("=", 1)[1]),
+        "results": metrics,
+        "params": params,
+        "params_key": param_key(params),
+        "split_path": split_part.split("=", 1)[1] if "=" in split_part else "",
+        "line": raw_line,
+    }
+
+
 def parse_result_rows(path):
     rows = []
     if not os.path.exists(path):
         return rows
-
     with open(path, "r") as f:
         for raw_line in f:
-            parts = [part.strip() for part in raw_line.rstrip("\n").split("|")]
-            if len(parts) < 7 or parts[0] not in ("(val)", "(test)"):
-                continue
-
-            params_part = next((part for part in parts if part.startswith("parameters=")), None)
-            seed_part = next((part for part in parts if part.startswith("seed=")), None)
-            split_part = next((part for part in parts if part.startswith("split_path=")), "")
-            if params_part is None or seed_part is None:
-                continue
-
-            params = parse_params_text(params_part)
-            if params is None:
-                continue
-
-            metrics = {
-                "recall": parse_metric_list(parts[3], "recall"),
-                "precision": parse_metric_list(parts[3], "precision"),
-                "ndcg": parse_metric_list(parts[3], "ndcg"),
-            }
-            if not metrics["recall"]:
-                continue
-
-            rows.append({
-                "mode": parts[0].strip("()"),
-                "dataset": parts[1],
-                "seed": int(seed_part.split("=", 1)[1]),
-                "results": metrics,
-                "params": params,
-                "params_key": param_key(params),
-                "split_path": split_part.split("=", 1)[1] if "=" in split_part else "",
-                "line": raw_line,
-            })
+            row = parse_result_line(raw_line)
+            if row is not None:
+                rows.append(row)
     return rows
 
 
-def existing_results(mode, dataset, seed, params=None):
+def parse_json_result_rows(path):
+    rows = []
+    if not os.path.exists(path):
+        return rows
+    with open(path, "r") as f:
+        for raw in f:
+            try:
+                record = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            line = record.get("line")
+            if not line:
+                continue
+            row = parse_result_line(line)
+            if row is not None:
+                rows.append(row)
+    return rows
+
+
+def available_result_rows(mode, include_tmp=True):
+    rows = parse_result_rows(mode_results_path(mode))
+    if include_tmp:
+        for path in tmp_result_paths():
+            rows.extend(
+                row for row in parse_json_result_rows(path)
+                if row["mode"] == mode
+            )
+    return rows
+
+
+def result_rows_match(rows, mode, dataset, seed, params=None):
     key = param_key(params) if params is not None else None
     return [
-        row for row in parse_result_rows(mode_results_path(mode))
+        row for row in rows
         if row["mode"] == mode
         and row["dataset"] == dataset
         and row["seed"] == seed
@@ -279,8 +332,20 @@ def existing_results(mode, dataset, seed, params=None):
     ]
 
 
+def existing_results(mode, dataset, seed, params=None, include_tmp=True):
+    return result_rows_match(
+        available_result_rows(mode, include_tmp=include_tmp),
+        mode, dataset, seed, params
+    )
+
+
 def first_existing_result(mode, dataset, seed, params):
     rows = existing_results(mode, dataset, seed, params)
+    return rows[-1] if rows else None
+
+
+def first_existing_final_result(mode, dataset, seed, params):
+    rows = existing_results(mode, dataset, seed, params, include_tmp=False)
     return rows[-1] if rows else None
 
 
@@ -335,13 +400,17 @@ def append_result(mode, params, results, epochs, runtime, split_path):
     print(f"[RESULTS] appended to {path}")
 
 
-def search_params(writer):
-    params_grid = list(itertools.product(
+def search_param_grid():
+    return list(itertools.product(
         world.SEARCH_RECDIMS,
         world.SEARCH_LRS,
         world.SEARCH_DECAYS,
         world.SEARCH_LAYERS
     ))
+
+
+def search_params(writer):
+    params_grid = search_param_grid()
     completed_keys = {
         row["params_key"]
         for row in existing_results("val", world.dataset, world.seed)
@@ -422,7 +491,7 @@ def add_arg(cmd, name, value):
     cmd.extend([f"--{name}", str(value)])
 
 
-def child_command(dataset, seed, result_file):
+def child_command(dataset, seed, result_file, task_mode="full", params=None):
     cmd = [sys.executable, "main.py"]
     args = world.args
     for name in (
@@ -438,7 +507,55 @@ def child_command(dataset, seed, result_file):
     add_arg(cmd, "seed", seed)
     add_arg(cmd, "single_run", 1)
     add_arg(cmd, "child_result_file", result_file)
+    add_arg(cmd, "task_mode", task_mode)
+    if params is not None:
+        add_arg(cmd, "task_recdim", params[0])
+        add_arg(cmd, "task_lr", params[1])
+        add_arg(cmd, "task_decay", params[2])
+        add_arg(cmd, "task_layer", params[3])
     return cmd
+
+
+def file_line_set(path):
+    if not os.path.exists(path):
+        return set()
+    with open(path, "r") as f:
+        return set(f.readlines())
+
+
+def cached_json_lines(mode, dataset, seed, params):
+    key = param_key(params)
+    lines = []
+    seen = set()
+    for path in tmp_result_paths():
+        for row in parse_json_result_rows(path):
+            if (
+                row["mode"] == mode
+                and row["dataset"] == dataset
+                and row["seed"] == seed
+                and row["params_key"] == key
+                and row["line"] not in seen
+            ):
+                seen.add(row["line"])
+                lines.append(row["line"])
+    return lines
+
+
+def write_cached_child_result(result_file, task):
+    lines = cached_json_lines(
+        task["task_mode"], task["dataset"], task["seed"], task["params"]
+    )
+    if not lines:
+        return
+    existing = set()
+    if os.path.exists(result_file):
+        existing = {row["line"] for row in parse_json_result_rows(result_file)}
+    os.makedirs(os.path.dirname(result_file), exist_ok=True)
+    with open(result_file, "a") as f:
+        for line in lines:
+            if line not in existing:
+                f.write(json.dumps({"mode": task["task_mode"], "line": line}) + "\n")
+                existing.add(line)
 
 
 def append_ordered_child_results(result_file, val_file, test_file, task_seed,
@@ -448,7 +565,10 @@ def append_ordered_child_results(result_file, val_file, test_file, task_seed,
     if os.path.exists(result_file):
         with open(result_file, "r") as f:
             for raw in f:
-                record = json.loads(raw)
+                try:
+                    record = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
                 if record["mode"] == "val":
                     val_lines.append(record["line"])
                 elif record["mode"] == "test":
@@ -457,6 +577,11 @@ def append_ordered_child_results(result_file, val_file, test_file, task_seed,
     if error_line:
         val_lines.append(error_line)
         test_lines.append(error_line)
+
+    val_existing = file_line_set(val_file)
+    test_existing = file_line_set(test_file)
+    val_lines = [line for line in val_lines if line not in val_existing]
+    test_lines = [line for line in test_lines if line not in test_existing]
 
     os.makedirs(os.path.dirname(val_file), exist_ok=True)
     add_seed_separator = previous_seed is not None and previous_seed != task_seed
@@ -472,9 +597,314 @@ def append_ordered_child_results(result_file, val_file, test_file, task_seed,
             f.write(line)
 
 
+def safe_token(value):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value))
+
+
+def params_slug(params):
+    return (
+        f"rd{params[0]}_lr{safe_token(params[1])}_"
+        f"dc{safe_token(params[2])}_ly{params[3]}"
+    )
+
+
+def task_file_base(task):
+    return (
+        f"{task['task_mode']}_seed_{task['seed']}_"
+        f"{safe_token(task['dataset'])}_{params_slug(task['params'])}"
+    )
+
+
+def attach_task_files(task, tmp_dir, log_dir):
+    base = task_file_base(task)
+    task["result_file"] = join(tmp_dir, f"{base}.jsonl")
+    task["log_file"] = join(log_dir, f"{base}.log")
+    return task
+
+
+def task_existing_result(task, include_tmp=True):
+    return first_existing_result(
+        task["task_mode"], task["dataset"], task["seed"], task["params"]
+    ) if include_tmp else first_existing_final_result(
+        task["task_mode"], task["dataset"], task["seed"], task["params"]
+    )
+
+
+def task_param_text(task):
+    params = task["params"]
+    return (
+        f"params=(recdim={params[0]}, lr={params[1]}, "
+        f"decay={params[2]}, layer={params[3]})"
+    )
+
+
+def run_task_batch(tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
+                   last_flushed_seed, batch_label):
+    active = []
+    next_task = 0
+    completed = {}
+    next_flush = 0
+
+    while next_task < len(tasks) or active:
+        while next_task < len(tasks) and len(active) < max_concurrent:
+            task = attach_task_files(tasks[next_task], tmp_dir, log_dir)
+            existing = task_existing_result(task, include_tmp=True)
+            if existing is not None:
+                if task_existing_result(task, include_tmp=False) is None:
+                    write_cached_child_result(task["result_file"], task)
+                completed[next_task] = {
+                    "index": next_task,
+                    "returncode": 0,
+                    "runtime": 0.0,
+                    "result_file": task["result_file"],
+                    "log_file": task["log_file"],
+                    "task": task,
+                    "skipped": True,
+                }
+                print(
+                    f"[SCHEDULER] resume: skipping {batch_label} #{next_task}: "
+                    f"{task['task_mode']} {task['dataset']} seed={task['seed']} "
+                    f"{task_param_text(task)}"
+                )
+                next_task += 1
+                continue
+
+            cmd = child_command(
+                task["dataset"], task["seed"], task["result_file"],
+                task_mode=task["task_mode"], params=task["params"]
+            )
+            log_handle = open(task["log_file"], "a")
+            log_handle.write(
+                f"\n[SCHEDULER] start {task['task_mode']} "
+                f"{task['dataset']} seed={task['seed']} {task_param_text(task)}\n"
+            )
+            log_handle.flush()
+            proc = subprocess.Popen(
+                cmd,
+                cwd=world.CODE_PATH,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+            )
+            print(
+                f"[SCHEDULER] started {batch_label} #{next_task}: "
+                f"{task['task_mode']} {task['dataset']} seed={task['seed']} "
+                f"{task_param_text(task)} log={task['log_file']}"
+            )
+            active.append({
+                "index": next_task,
+                "proc": proc,
+                "log_handle": log_handle,
+                "result_file": task["result_file"],
+                "log_file": task["log_file"],
+                "task": task,
+                "start": time.time(),
+            })
+            next_task += 1
+
+        still_active = []
+        for run in active:
+            returncode = run["proc"].poll()
+            if returncode is None:
+                still_active.append(run)
+                continue
+            run["log_handle"].close()
+            run["returncode"] = returncode
+            run["runtime"] = time.time() - run["start"]
+            completed[run["index"]] = run
+            status = "OK" if returncode == 0 else f"FAILED({returncode})"
+            print(
+                f"[SCHEDULER] finished {batch_label} #{run['index']}: "
+                f"{run['task']['task_mode']} {run['task']['dataset']} "
+                f"seed={run['task']['seed']} {status} runtime={run['runtime']:.2f}s"
+            )
+        active = still_active
+
+        while next_flush in completed:
+            run = completed.pop(next_flush)
+            error_line = None
+            if run["returncode"] != 0:
+                task = run["task"]
+                error_line = (
+                    f"(error) | {task['dataset']:<{DATASET_COL_WIDTH}} | seed={task['seed']} | "
+                    f"{task_param_text(task)} | runtime={run['runtime']:.2f}s | "
+                    f"split_path={format_output_path(task['split_path'])} | "
+                    f"log={format_output_path(run['log_file'])}\n"
+                )
+            append_ordered_child_results(
+                run["result_file"],
+                val_file,
+                test_file,
+                task_seed=run["task"]["seed"],
+                previous_seed=last_flushed_seed,
+                error_line=error_line,
+            )
+            last_flushed_seed = run["task"]["seed"]
+            if os.path.exists(run["result_file"]):
+                os.remove(run["result_file"])
+            print(f"[SCHEDULER] flushed {batch_label} #{next_flush} results in initiation order")
+            next_flush += 1
+
+        if active:
+            time.sleep(1)
+
+    return last_flushed_seed
+
+
+def validate_scheduler_inputs(datasets, seeds):
+    unknown = [dataset for dataset in datasets if dataset not in world.all_dataset]
+    if unknown:
+        raise NotImplementedError(f"Haven't supported {unknown} yet!, try {world.all_dataset}")
+    for seed in seeds:
+        for dataset in datasets:
+            split_path = join(world.DATA_PATH, f"00_dataset_seed_{seed}", dataset)
+            if not os.path.isdir(split_path):
+                raise FileNotFoundError(f"Split dataset not found: {split_path}")
+
+
+def last_result_seed():
+    rows = parse_result_rows(validation_results_path())
+    if rows:
+        return rows[-1]["seed"]
+    rows = parse_result_rows(test_results_path())
+    if rows:
+        return rows[-1]["seed"]
+    return None
+
+
+def run_search_scheduler(datasets, seeds):
+    validate_scheduler_inputs(datasets, seeds)
+    max_concurrent = max(1, world.args.concurrent_runs)
+    results_dir = join(world.ROOT_PATH, "results")
+    tmp_dir = tmp_results_dir()
+    log_dir = join(results_dir, "logs")
+    os.makedirs(tmp_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+    val_file = validation_results_path()
+    test_file = test_results_path()
+    params_grid = search_param_grid()
+    last_flushed_seed = last_result_seed()
+    started_at = time.time()
+
+    print(
+        f"[SCHEDULER] launching parameter search with concurrent_runs={max_concurrent}; "
+        f"datasets={datasets}; seeds={seeds}; validation={val_file}, test={test_file}"
+    )
+
+    for seed in seeds:
+        for dataset in datasets:
+            split_path = join(world.DATA_PATH, f"00_dataset_seed_{seed}", dataset)
+            val_tasks = [
+                {
+                    "task_mode": "val",
+                    "seed": seed,
+                    "dataset": dataset,
+                    "params": params,
+                    "split_path": split_path,
+                }
+                for params in params_grid
+            ]
+            print(
+                f"[SCHEDULER] validation grid: {dataset} seed={seed} "
+                f"({len(val_tasks)} parameter runs)"
+            )
+            last_flushed_seed = run_task_batch(
+                val_tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
+                last_flushed_seed, f"{dataset}-seed-{seed}-val"
+            )
+
+            best_row, best_score = best_existing_validation(dataset, seed, params_grid)
+            if best_row is None:
+                raise RuntimeError(
+                    f"No validation results found for {dataset} seed={seed}; "
+                    "cannot choose best hyperparameters."
+                )
+            best_params = best_row["params"]
+            print(
+                f"[SCHEDULER] best params for {dataset} seed={seed}: "
+                f"{best_params} Recall@{world.topks[0]}={best_score:.6f}"
+            )
+            test_task = [{
+                "task_mode": "test",
+                "seed": seed,
+                "dataset": dataset,
+                "params": best_params,
+                "split_path": split_path,
+            }]
+            last_flushed_seed = run_task_batch(
+                test_task, 1, tmp_dir, log_dir, val_file, test_file,
+                last_flushed_seed, f"{dataset}-seed-{seed}-test"
+            )
+
+    for path in (val_file, test_file):
+        with open(path, "a") as f:
+            f.write("\n")
+
+    print(f"[SCHEDULER] all search runs complete in {time.time() - started_at:.2f}s")
+
+
+def task_params_from_args():
+    values = (
+        world.args.task_recdim,
+        world.args.task_lr,
+        world.args.task_decay,
+        world.args.task_layer,
+    )
+    if any(value is None for value in values):
+        raise ValueError("--task_mode val/test requires task_recdim, task_lr, task_decay, and task_layer")
+    return values
+
+
+def run_internal_task(writer):
+    params = task_params_from_args()
+    split_path = join(world.SPLIT_PATH, world.dataset)
+
+    if world.args.task_mode == "val":
+        existing_val = first_existing_result("val", world.dataset, world.seed, params)
+        if existing_val is not None:
+            print(
+                f"[TASK] resume: skipping existing validation for "
+                f"{world.dataset} seed={world.seed} params={params}"
+            )
+            return existing_val["results"]
+        print(f"[TASK] validating params={params}")
+        validation_results, _, epochs, best_epoch, runtime = train_and_eval(
+            params, test_eval_file="val.txt", writer=writer
+        )
+        logged_epochs = best_epoch if best_epoch is not None else epochs
+        append_result("val", params, validation_results, logged_epochs, runtime, split_path)
+        return validation_results
+
+    if world.args.task_mode == "test":
+        existing_test = first_existing_result("test", world.dataset, world.seed, params)
+        if existing_test is not None:
+            print(
+                f"[TASK] resume: skipping existing test for "
+                f"{world.dataset} seed={world.seed} params={params}"
+            )
+            return existing_test["results"]
+        print(f"[TASK] testing params={params}")
+        validation_results, final_results, epochs, best_epoch, runtime = train_and_eval(
+            params,
+            test_eval_file="test.txt",
+            writer=writer,
+            save_weight_file="auto"
+        )
+        logged_epochs = best_epoch if best_epoch is not None else epochs
+        if first_existing_result("val", world.dataset, world.seed, params) is None:
+            append_result("val", params, validation_results, logged_epochs, runtime, split_path)
+        append_result("test", params, final_results, logged_epochs, runtime, split_path)
+        return final_results
+
+    raise ValueError(f"Unknown task mode: {world.args.task_mode}")
+
+
 def run_scheduler():
     datasets = scheduler_datasets()
     seeds = scheduler_seeds()
+    if world.search:
+        run_search_scheduler(datasets, seeds)
+        return
+
     unknown = [dataset for dataset in datasets if dataset not in world.all_dataset]
     if unknown:
         raise NotImplementedError(f"Haven't supported {unknown} yet!, try {world.all_dataset}")
@@ -513,9 +943,8 @@ def run_scheduler():
             task = tasks[next_task]
             result_file = join(tmp_dir, f"run_{next_task:04d}.jsonl")
             log_file = join(log_dir, f"run_{next_task:04d}_{task['dataset']}_seed_{task['seed']}.log")
-            for path in (result_file, log_file):
-                if os.path.exists(path):
-                    os.remove(path)
+            if os.path.exists(log_file):
+                os.remove(log_file)
             cmd = child_command(task["dataset"], task["seed"], result_file)
             log_handle = open(log_file, "w")
             proc = subprocess.Popen(
@@ -612,6 +1041,11 @@ def main():
         world.cprint("not enable tensorflowboard")
 
     try:
+        if world.args.task_mode != "full":
+            final_results = run_internal_task(writer)
+            print(f"[FINAL] results={final_results}\n")
+            return
+
         if world.search:
             best_params = search_params(writer)
             existing_test = first_existing_result("test", world.dataset, world.seed, best_params)
