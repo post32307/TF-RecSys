@@ -69,6 +69,8 @@ def parse_args():
                         help="seeds to run; use this for multi-seed runs")
     parser.add_argument('--concurrent_runs', type=int, default=1,
                         help="maximum number of concurrent single-run processes")
+    parser.add_argument('--gpu_ids', nargs='+', default=None,
+                        help="GPU IDs assigned round-robin to child runs; e.g. --gpu_ids 0 1 2 3")
     parser.add_argument('--single_run', type=int, default=0,
                         help="internal flag used by the multi-run scheduler")
     parser.add_argument('--child_result_file', type=str, default=None,

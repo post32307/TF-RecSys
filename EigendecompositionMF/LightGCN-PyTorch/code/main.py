@@ -487,6 +487,25 @@ def scheduler_seeds():
     return world.args.seeds
 
 
+def scheduler_gpu_ids():
+    if world.args.gpu_ids is None:
+        return []
+    return [str(gpu) for gpu in expand_list(world.args.gpu_ids)]
+
+
+def child_env(gpu_ids, launch_index):
+    env = os.environ.copy()
+    if gpu_ids:
+        env["CUDA_VISIBLE_DEVICES"] = gpu_ids[launch_index % len(gpu_ids)]
+    return env
+
+
+def task_gpu_id(gpu_ids, launch_index):
+    if not gpu_ids:
+        return None
+    return gpu_ids[launch_index % len(gpu_ids)]
+
+
 def add_arg(cmd, name, value):
     cmd.extend([f"--{name}", str(value)])
 
@@ -639,7 +658,9 @@ def task_param_text(task):
 
 
 def run_task_batch(tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
-                   last_flushed_seed, batch_label):
+                   last_flushed_seed, batch_label, gpu_ids=None):
+    if gpu_ids is None:
+        gpu_ids = []
     active = []
     next_task = 0
     completed = {}
@@ -673,25 +694,30 @@ def run_task_batch(tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
                 task["dataset"], task["seed"], task["result_file"],
                 task_mode=task["task_mode"], params=task["params"]
             )
+            gpu_id = task_gpu_id(gpu_ids, next_task)
+            env = child_env(gpu_ids, next_task)
             log_handle = open(task["log_file"], "a")
+            gpu_text = f" gpu={gpu_id}" if gpu_id is not None else ""
             log_handle.write(
                 f"\n[SCHEDULER] start {task['task_mode']} "
-                f"{task['dataset']} seed={task['seed']} {task_param_text(task)}\n"
+                f"{task['dataset']} seed={task['seed']} {task_param_text(task)}{gpu_text}\n"
             )
             log_handle.flush()
             proc = subprocess.Popen(
                 cmd,
                 cwd=world.CODE_PATH,
+                env=env,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
             )
             print(
                 f"[SCHEDULER] started {batch_label} #{next_task}: "
                 f"{task['task_mode']} {task['dataset']} seed={task['seed']} "
-                f"{task_param_text(task)} log={task['log_file']}"
+                f"{task_param_text(task)}{gpu_text} log={task['log_file']}"
             )
             active.append({
                 "index": next_task,
+                "gpu_id": gpu_id,
                 "proc": proc,
                 "log_handle": log_handle,
                 "result_file": task["result_file"],
@@ -774,6 +800,7 @@ def last_result_seed():
 def run_search_scheduler(datasets, seeds):
     validate_scheduler_inputs(datasets, seeds)
     max_concurrent = max(1, world.args.concurrent_runs)
+    gpu_ids = scheduler_gpu_ids()
     results_dir = join(world.ROOT_PATH, "results")
     tmp_dir = tmp_results_dir()
     log_dir = join(results_dir, "logs")
@@ -787,7 +814,8 @@ def run_search_scheduler(datasets, seeds):
 
     print(
         f"[SCHEDULER] launching parameter search with concurrent_runs={max_concurrent}; "
-        f"datasets={datasets}; seeds={seeds}; validation={val_file}, test={test_file}"
+        f"gpu_ids={gpu_ids or 'default'}; datasets={datasets}; seeds={seeds}; "
+        f"validation={val_file}, test={test_file}"
     )
 
     for seed in seeds:
@@ -809,7 +837,7 @@ def run_search_scheduler(datasets, seeds):
             )
             last_flushed_seed = run_task_batch(
                 val_tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
-                last_flushed_seed, f"{dataset}-seed-{seed}-val"
+                last_flushed_seed, f"{dataset}-seed-{seed}-val", gpu_ids=gpu_ids
             )
 
             best_row, best_score = best_existing_validation(dataset, seed, params_grid)
@@ -832,7 +860,7 @@ def run_search_scheduler(datasets, seeds):
             }]
             last_flushed_seed = run_task_batch(
                 test_task, 1, tmp_dir, log_dir, val_file, test_file,
-                last_flushed_seed, f"{dataset}-seed-{seed}-test"
+                last_flushed_seed, f"{dataset}-seed-{seed}-test", gpu_ids=gpu_ids
             )
 
     for path in (val_file, test_file):
@@ -918,6 +946,7 @@ def run_scheduler():
             tasks.append({"seed": seed, "dataset": dataset, "split_path": split_path})
 
     max_concurrent = max(1, world.args.concurrent_runs)
+    gpu_ids = scheduler_gpu_ids()
     results_dir = join(world.ROOT_PATH, "results")
     tmp_dir = join(results_dir, "tmp")
     log_dir = join(results_dir, "logs")
@@ -928,7 +957,7 @@ def run_scheduler():
 
     print(
         f"[SCHEDULER] launching {len(tasks)} runs with concurrent_runs={max_concurrent}; "
-        f"validation={val_file}, test={test_file}"
+        f"gpu_ids={gpu_ids or 'default'}; validation={val_file}, test={test_file}"
     )
 
     active = []
@@ -946,19 +975,24 @@ def run_scheduler():
             if os.path.exists(log_file):
                 os.remove(log_file)
             cmd = child_command(task["dataset"], task["seed"], result_file)
+            gpu_id = task_gpu_id(gpu_ids, next_task)
+            env = child_env(gpu_ids, next_task)
             log_handle = open(log_file, "w")
             proc = subprocess.Popen(
                 cmd,
                 cwd=world.CODE_PATH,
+                env=env,
                 stdout=log_handle,
                 stderr=subprocess.STDOUT,
             )
+            gpu_text = f" gpu={gpu_id}" if gpu_id is not None else ""
             print(
                 f"[SCHEDULER] started #{next_task}: {task['dataset']} seed={task['seed']} "
-                f"log={log_file}"
+                f"{gpu_text} log={log_file}"
             )
             active.append({
                 "index": next_task,
+                "gpu_id": gpu_id,
                 "proc": proc,
                 "log_handle": log_handle,
                 "result_file": result_file,
