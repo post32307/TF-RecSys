@@ -1,0 +1,1 @@
+{"mode": "val", "line": "(val) | news                 | seed=2020 | recall=[0.201500], precision=[0.020144], ndcg=[0.094857] | epochs=160 | parameters=(recdim=128, lr=0.001, decay=1e-05, layer=3, bpr_batch=2048, topks=[20]) | runtime=6608.54s | split_path=../data/split_dataset/00_dataset_seed_2020/news\n"}
