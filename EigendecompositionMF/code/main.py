@@ -148,15 +148,25 @@ try:
         plt.close(fig)
         return k_values, energy_values, output_file
 
+
+
     print()
     import dataloader
     import model
+    import tmp
     dataset = dataloader.Loader(path=dataset_path)
     Recmodel = model.PSEmodel(world.config, dataset)
     PlotEnergy(Recmodel.A, Recmodel.k, output_file="Plot_A")
-    PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.5,alpha2=0.5), Recmodel.k, output_file="Plot_A_tilde")
+    PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.1,alpha2=0.1), Recmodel.k, output_file="Plot_A_tilde_01")
+    PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.5,alpha2=0.5), Recmodel.k, output_file="Plot_A_tilde_05")
     PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.2,alpha2=0.4), Recmodel.k, output_file="Plot_A_norm")
     
+    sgfcf_params = tmp.get_sgfcf_params(dataset_name, Recmodel.k)
+    filter_models = tmp.build_filter_models(Recmodel, sgfcf_params)
+    filter_results = tmp.evaluate_filter_models(filter_models, dataset)
+    world.cprint(f"SGFCF parameters: {sgfcf_params}")
+    for filter_name, result in filter_results.items():
+        world.cprint(f"{filter_name} filter: {result}")
 
 finally:
     if world.tensorboard:

@@ -85,7 +85,7 @@ class PSEmodel:
 
     # Evaluation Functions
 
-    def getUsersRating(self,X,users):
+    def getUsersRating(self,X,users,apply_sigmoid=True):
         X = X.to(self.device)
         users = users.long()
         users_emb = X[:self.n_users,:]
@@ -93,7 +93,7 @@ class PSEmodel:
         users_emb = users_emb[users,:]
         items_emb = items_emb
         scores = torch.matmul(users_emb, items_emb.t())
-        return self.Sigmoid(scores)
+        return self.Sigmoid(scores) if apply_sigmoid else scores
 
     def test_one_batch(self,X_groundTrue):
         sorted_items = X_groundTrue[0].numpy()

@@ -776,6 +776,180 @@ def run_task_batch(tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
     return last_flushed_seed
 
 
+def search_unit_key(task):
+    return task["dataset"], task["seed"]
+
+
+def make_search_task(task_mode, dataset, seed, split_path, params):
+    return {
+        "task_mode": task_mode,
+        "seed": seed,
+        "dataset": dataset,
+        "params": params,
+        "split_path": split_path,
+    }
+
+
+def write_error_child_result(run):
+    task = run["task"]
+    error_line = (
+        f"(error) | {task['dataset']:<{DATASET_COL_WIDTH}} | seed={task['seed']} | "
+        f"{task_param_text(task)} | runtime={run['runtime']:.2f}s | "
+        f"split_path={format_output_path(task['split_path'])} | "
+        f"log={format_output_path(run['log_file'])}\n"
+    )
+    os.makedirs(os.path.dirname(run["result_file"]), exist_ok=True)
+    with open(run["result_file"], "a") as f:
+        f.write(json.dumps({"mode": task["task_mode"], "line": error_line}) + "\n")
+
+
+def flush_task_result(task, val_file, test_file, previous_seed, flush_label):
+    if task_existing_result(task, include_tmp=False) is not None:
+        if os.path.exists(task["result_file"]):
+            os.remove(task["result_file"])
+        return True, previous_seed
+
+    if not os.path.exists(task["result_file"]):
+        write_cached_child_result(task["result_file"], task)
+    if not os.path.exists(task["result_file"]):
+        return False, previous_seed
+
+    append_ordered_child_results(
+        task["result_file"],
+        val_file,
+        test_file,
+        task_seed=task["seed"],
+        previous_seed=previous_seed,
+    )
+    if os.path.exists(task["result_file"]):
+        os.remove(task["result_file"])
+    print(f"[SCHEDULER] flushed {flush_label} result in output order")
+    return True, task["seed"]
+
+
+def start_scheduler_task(task, launch_index, gpu_ids):
+    cmd = child_command(
+        task["dataset"], task["seed"], task["result_file"],
+        task_mode=task["task_mode"], params=task["params"]
+    )
+    gpu_id = task_gpu_id(gpu_ids, launch_index)
+    env = child_env(gpu_ids, launch_index)
+    log_handle = open(task["log_file"], "a")
+    gpu_text = f" gpu={gpu_id}" if gpu_id is not None else ""
+    log_handle.write(
+        f"\n[SCHEDULER] start {task['task_mode']} "
+        f"{task['dataset']} seed={task['seed']} {task_param_text(task)}{gpu_text}\n"
+    )
+    log_handle.flush()
+    proc = subprocess.Popen(
+        cmd,
+        cwd=world.CODE_PATH,
+        env=env,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+    )
+    print(
+        f"[SCHEDULER] started #{launch_index}: {task['task_mode']} "
+        f"{task['dataset']} seed={task['seed']} {task_param_text(task)}"
+        f"{gpu_text} log={task['log_file']}"
+    )
+    return {
+        "index": launch_index,
+        "gpu_id": gpu_id,
+        "proc": proc,
+        "log_handle": log_handle,
+        "result_file": task["result_file"],
+        "log_file": task["log_file"],
+        "task": task,
+        "start": time.time(),
+    }
+
+
+def maybe_enqueue_search_test(unit_key, unit_states, params_grid, ready_tests,
+                              tmp_dir, log_dir, val_file, test_file):
+    state = unit_states[unit_key]
+    if state["remaining_val"] != 0 or state["test_enqueued"] or state["test_done"]:
+        return
+
+    dataset, seed = unit_key
+    best_row, best_score = best_existing_validation(dataset, seed, params_grid)
+    if best_row is None:
+        raise RuntimeError(
+            f"No validation results found for {dataset} seed={seed}; "
+            "cannot choose best hyperparameters."
+        )
+
+    best_params = best_row["params"]
+    state["best_params"] = best_params
+    print(
+        f"[SCHEDULER] best params for {dataset} seed={seed}: "
+        f"{best_params} Recall@{world.topks[0]}={best_score:.6f}"
+    )
+
+    task = make_search_task("test", dataset, seed, state["split_path"], best_params)
+    task = attach_task_files(task, tmp_dir, log_dir)
+    state["test_task"] = task
+    existing = task_existing_result(task, include_tmp=True)
+    if existing is not None:
+        if task_existing_result(task, include_tmp=False) is None:
+            write_cached_child_result(task["result_file"], task)
+        state["test_done"] = True
+        print(
+            f"[SCHEDULER] resume: skipping existing test for "
+            f"{dataset} seed={seed} {task_param_text(task)}"
+        )
+        return
+
+    ready_tests.append(task)
+    state["test_enqueued"] = True
+    print(
+        f"[SCHEDULER] queued test for {dataset} seed={seed} "
+        f"{task_param_text(task)}"
+    )
+
+
+def flush_ready_search_results(unit_order, unit_states, val_file, test_file, flush_state):
+    while flush_state["val_unit_index"] < len(unit_order):
+        unit_key = unit_order[flush_state["val_unit_index"]]
+        state = unit_states[unit_key]
+        val_tasks = state["val_tasks"]
+        while state["val_flush_index"] < len(val_tasks):
+            task = val_tasks[state["val_flush_index"]]
+            flushed, previous_seed = flush_task_result(
+                task,
+                val_file,
+                test_file,
+                flush_state["last_val_seed"],
+                f"validation {task['dataset']} seed={task['seed']}",
+            )
+            if not flushed:
+                break
+            flush_state["last_val_seed"] = previous_seed
+            state["val_flush_index"] += 1
+
+        if state["val_flush_index"] < len(val_tasks):
+            break
+        flush_state["val_unit_index"] += 1
+
+    while flush_state["test_unit_index"] < len(unit_order):
+        unit_key = unit_order[flush_state["test_unit_index"]]
+        state = unit_states[unit_key]
+        task = state.get("test_task")
+        if task is None:
+            break
+        flushed, previous_seed = flush_task_result(
+            task,
+            val_file,
+            test_file,
+            flush_state["last_test_seed"],
+            f"test {task['dataset']} seed={task['seed']}",
+        )
+        if not flushed:
+            break
+        flush_state["last_test_seed"] = previous_seed
+        flush_state["test_unit_index"] += 1
+
+
 def validate_scheduler_inputs(datasets, seeds):
     unknown = [dataset for dataset in datasets if dataset not in world.all_dataset]
     if unknown:
@@ -797,6 +971,11 @@ def last_result_seed():
     return None
 
 
+def last_result_seed_for_path(path):
+    rows = parse_result_rows(path)
+    return rows[-1]["seed"] if rows else None
+
+
 def run_search_scheduler(datasets, seeds):
     validate_scheduler_inputs(datasets, seeds)
     max_concurrent = max(1, world.args.concurrent_runs)
@@ -809,59 +988,158 @@ def run_search_scheduler(datasets, seeds):
     val_file = validation_results_path()
     test_file = test_results_path()
     params_grid = search_param_grid()
-    last_flushed_seed = last_result_seed()
     started_at = time.time()
 
     print(
-        f"[SCHEDULER] launching parameter search with concurrent_runs={max_concurrent}; "
+        f"[SCHEDULER] launching global parameter search with concurrent_runs={max_concurrent}; "
         f"gpu_ids={gpu_ids or 'default'}; datasets={datasets}; seeds={seeds}; "
         f"validation={val_file}, test={test_file}"
     )
 
+    unit_states = {}
+    unit_order = []
+    pending_validations = []
+    existing_validations = 0
+    cached_validations = 0
+
     for seed in seeds:
         for dataset in datasets:
             split_path = join(world.DATA_PATH, f"00_dataset_seed_{seed}", dataset)
-            val_tasks = [
-                {
-                    "task_mode": "val",
-                    "seed": seed,
-                    "dataset": dataset,
-                    "params": params,
-                    "split_path": split_path,
-                }
-                for params in params_grid
-            ]
+            unit_key = (dataset, seed)
+            unit_order.append(unit_key)
+            unit_states[unit_key] = {
+                "dataset": dataset,
+                "seed": seed,
+                "split_path": split_path,
+                "remaining_val": 0,
+                "test_enqueued": False,
+                "test_done": False,
+                "best_params": None,
+                "val_tasks": [],
+                "val_flush_index": 0,
+                "test_task": None,
+            }
+
+            completed_for_unit = 0
+            for params in params_grid:
+                task = make_search_task("val", dataset, seed, split_path, params)
+                task = attach_task_files(task, tmp_dir, log_dir)
+                unit_states[unit_key]["val_tasks"].append(task)
+                existing = task_existing_result(task, include_tmp=True)
+                if existing is not None:
+                    existing_validations += 1
+                    completed_for_unit += 1
+                    if task_existing_result(task, include_tmp=False) is None:
+                        cached_validations += 1
+                        write_cached_child_result(task["result_file"], task)
+                    continue
+
+                unit_states[unit_key]["remaining_val"] += 1
+                pending_validations.append(task)
+
             print(
                 f"[SCHEDULER] validation grid: {dataset} seed={seed} "
-                f"({len(val_tasks)} parameter runs)"
-            )
-            last_flushed_seed = run_task_batch(
-                val_tasks, max_concurrent, tmp_dir, log_dir, val_file, test_file,
-                last_flushed_seed, f"{dataset}-seed-{seed}-val", gpu_ids=gpu_ids
+                f"({completed_for_unit}/{len(params_grid)} complete, "
+                f"{unit_states[unit_key]['remaining_val']} pending)"
             )
 
-            best_row, best_score = best_existing_validation(dataset, seed, params_grid)
-            if best_row is None:
-                raise RuntimeError(
-                    f"No validation results found for {dataset} seed={seed}; "
-                    "cannot choose best hyperparameters."
+    ready_tests = []
+    for unit_key in unit_states:
+        maybe_enqueue_search_test(
+            unit_key, unit_states, params_grid, ready_tests,
+            tmp_dir, log_dir, val_file, test_file
+        )
+    flush_state = {
+        "val_unit_index": 0,
+        "test_unit_index": 0,
+        "last_val_seed": last_result_seed_for_path(val_file),
+        "last_test_seed": last_result_seed_for_path(test_file),
+    }
+    flush_ready_search_results(unit_order, unit_states, val_file, test_file, flush_state)
+
+    print(
+        f"[SCHEDULER] queued {len(pending_validations)} pending validation tasks; "
+        f"{existing_validations} validation tasks already complete "
+        f"({cached_validations} staged from tmp); {len(ready_tests)} tests ready"
+    )
+
+    active = []
+    next_validation = 0
+    launch_index = 0
+
+    while next_validation < len(pending_validations) or ready_tests or active:
+        while len(active) < max_concurrent:
+            if ready_tests:
+                task = ready_tests.pop(0)
+            elif next_validation < len(pending_validations):
+                task = pending_validations[next_validation]
+                next_validation += 1
+            else:
+                break
+
+            existing = task_existing_result(task, include_tmp=True)
+            if existing is not None:
+                if task_existing_result(task, include_tmp=False) is None:
+                    write_cached_child_result(task["result_file"], task)
+
+                unit_key = search_unit_key(task)
+                if task["task_mode"] == "val":
+                    unit_states[unit_key]["remaining_val"] = max(
+                        0, unit_states[unit_key]["remaining_val"] - 1
+                    )
+                    maybe_enqueue_search_test(
+                        unit_key, unit_states, params_grid, ready_tests,
+                        tmp_dir, log_dir, val_file, test_file
+                    )
+                elif task["task_mode"] == "test":
+                    unit_states[unit_key]["test_done"] = True
+                print(
+                    f"[SCHEDULER] resume: skipping existing {task['task_mode']} "
+                    f"{task['dataset']} seed={task['seed']} {task_param_text(task)}"
                 )
-            best_params = best_row["params"]
+                flush_ready_search_results(unit_order, unit_states, val_file, test_file, flush_state)
+                continue
+
+            active.append(start_scheduler_task(task, launch_index, gpu_ids))
+            launch_index += 1
+
+        still_active = []
+        for run in active:
+            returncode = run["proc"].poll()
+            if returncode is None:
+                still_active.append(run)
+                continue
+
+            run["log_handle"].close()
+            run["returncode"] = returncode
+            run["runtime"] = time.time() - run["start"]
+            status = "OK" if returncode == 0 else f"FAILED({returncode})"
+            task = run["task"]
             print(
-                f"[SCHEDULER] best params for {dataset} seed={seed}: "
-                f"{best_params} Recall@{world.topks[0]}={best_score:.6f}"
+                f"[SCHEDULER] finished #{run['index']}: {task['task_mode']} "
+                f"{task['dataset']} seed={task['seed']} {status} "
+                f"runtime={run['runtime']:.2f}s"
             )
-            test_task = [{
-                "task_mode": "test",
-                "seed": seed,
-                "dataset": dataset,
-                "params": best_params,
-                "split_path": split_path,
-            }]
-            last_flushed_seed = run_task_batch(
-                test_task, 1, tmp_dir, log_dir, val_file, test_file,
-                last_flushed_seed, f"{dataset}-seed-{seed}-test", gpu_ids=gpu_ids
-            )
+            if run["returncode"] != 0:
+                write_error_child_result(run)
+
+            unit_key = search_unit_key(task)
+            if task["task_mode"] == "val":
+                unit_states[unit_key]["remaining_val"] = max(
+                    0, unit_states[unit_key]["remaining_val"] - 1
+                )
+                maybe_enqueue_search_test(
+                    unit_key, unit_states, params_grid, ready_tests,
+                    tmp_dir, log_dir, val_file, test_file
+                )
+            elif task["task_mode"] == "test":
+                unit_states[unit_key]["test_done"] = True
+            flush_ready_search_results(unit_order, unit_states, val_file, test_file, flush_state)
+
+        active = still_active
+
+        if active:
+            time.sleep(1)
 
     for path in (val_file, test_file):
         with open(path, "a") as f:
