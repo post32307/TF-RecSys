@@ -5,6 +5,8 @@ Thu Jul  2 17:28:18 2026 : BSPM / epinions
 Fri Jul  3 11:04:14 2026 : BSPM / amazon-CD
 Fri Jul  3 16:07:05 2026 : BSPM / news
 Sat Jul  4 09:50:09 2026 : BSPM / gowalla
+Thu Jul 30 12:21:13 2026 : DAN / amazon-electronics
+Thu Jul 30 12:26:26 2026 : DAN / citeulike
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
@@ -84,3 +86,9 @@ GF-CF      | yelp2018             | (Test) Recall@20: 0.107521, NDCG@20: 0.06722
 PGSP       | yelp2018             | (Test) Recall@20: 0.1046, NDCG@20: 0.0654                    | 00:37    | k=512, phi=0.0
 TurboCF    | yelp2018             | (Test) Recall@20: 0.1044, NDCG@20: 0.0656                    | 10:59    | alpha=0.5, power=1.0, filter=2
 SGFCF      | yelp2018             | (Test) Recall@20: 0.1165, NDCG@20: 0.0737                    | 01:04    | k=512, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+
+DAN        | amazon-electronics   | (Test) Recall@20: 0.13646, NDCG@20: 0.0776844                | 00:00    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.3, drop_p=0.6
+ChebyCF    | amazon-electronics   | (Test) Recall@20: 0.137708, NDCG@20: 0.075645                | 00:02    | K=8, phi=1.5, eta=256, alpha=0.1, beta=0.2
+
+DAN        | lastfm               | (Test) Recall@20: 0.282465, NDCG@20: 0.169188                | 00:02    | model=RLAE_DAN, reg_p=50.0, alpha=0.3, beta=0.3, drop_p=0.7
+ChebyCF    | lastfm               | (Test) Recall@20: 0.281787, NDCG@20: 0.166162                | 00:02    | K=8, phi=1.5, eta=256, alpha=0.2, beta=0.2
