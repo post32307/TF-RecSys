@@ -2374,3 +2374,9 @@ DAN        | citeulike            | (Val) Recall@20: 0.310646, NDCG@20: 0.224236
 DAN        | citeulike            | (Val) Recall@20: 0.308962, NDCG@20: 0.224111                 | 01:13    | model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.2, drop_p=0.7
 DAN        | citeulike            | (Val) Recall@20: 0.308323, NDCG@20: 0.223767                 | 01:10    | model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.3, drop_p=0.4
 DAN        | citeulike            | (Val) Recall@20: 0.308987, NDCG@20: 0.223686                 | 01:14    | model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.3, drop_p=0.6
+DAN        | citeulike            | (Val) Recall@20: 0.308773, NDCG@20: 0.223284                 | 01:14    | model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.3, drop_p=0.7
+DAN        | citeulike            | (Val) Recall@20: 0.305697, NDCG@20: 0.221381                 | 01:13    | model=RLAE_DAN, reg_p=10.0, alpha=0.3, beta=0.2, drop_p=0.4
+DAN        | citeulike            | (Val) Recall@20: 0.307647, NDCG@20: 0.221667                 | 01:11    | model=RLAE_DAN, reg_p=10.0, alpha=0.3, beta=0.2, drop_p=0.6
+DAN        | citeulike            | (Val) Recall@20: 0.30754, NDCG@20: 0.220957                  | 01:14    | model=RLAE_DAN, reg_p=10.0, alpha=0.3, beta=0.2, drop_p=0.7
+DAN        | citeulike            | (Val) Recall@20: 0.307293, NDCG@20: 0.221869                 | 01:13    | model=RLAE_DAN, reg_p=10.0, alpha=0.3, beta=0.3, drop_p=0.4
+DAN        | citeulike            | (Val) Recall@20: 0.305937, NDCG@20: 0.220257                 | 01:11    | model=RLAE_DAN, reg_p=10.0, alpha=0.3, beta=0.3, drop_p=0.6
