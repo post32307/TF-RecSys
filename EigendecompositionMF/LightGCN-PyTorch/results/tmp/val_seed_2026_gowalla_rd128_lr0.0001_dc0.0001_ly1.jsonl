@@ -1,1 +1,0 @@
-{"mode": "val", "line": "(val) | gowalla              | seed=2026 | recall=[0.199100], precision=[0.023529], ndcg=[0.114247] | epochs=1000 | parameters=(recdim=128, lr=0.0001, decay=0.0001, layer=1, bpr_batch=2048, topks=[20]) | runtime=41122.36s | split_path=../data/split_dataset/00_dataset_seed_2026/gowalla\n"}

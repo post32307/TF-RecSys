@@ -9,7 +9,9 @@ def main():
     set_logger(args.comment)
     log_args(args)
     
-    train_data, test_dataloader = load_data(args.dataset, args.batch_size, args.device)
+    train_data, test_dataloader = load_data(
+        args.dataset, args.batch_size, args.device, args.seed
+    )
     model = build_model(args)
     train(model, train_data, args.device)
     test(model, test_dataloader, args.metrics, args.top_ks)

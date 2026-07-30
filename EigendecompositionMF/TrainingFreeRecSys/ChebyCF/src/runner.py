@@ -15,17 +15,22 @@ def train(model, train_data, device):
 
 def test(model, test_dataloader, metrics, top_ks):
     model.eval()
-    result = np.zeros((len(metrics), len(top_ks)), dtype=np.float32)
+    result = np.zeros((len(metrics), len(top_ks)), dtype=np.float64)
     for observed_inter, label_inter in tqdm(test_dataloader, desc='Testing', total=len(test_dataloader)):
         # Predict preference scores for all items and mask observed interactions
         with torch.no_grad():
             pred_score = model.full_predict(observed_inter)
         # Rank top-k items based on the scores
+        if max(top_ks) > pred_score.shape[1]:
+            raise ValueError(
+                f"Requested top-k {max(top_ks)} exceeds the number of items "
+                f"({pred_score.shape[1]})."
+            )
         _, ranked_items = torch.topk(pred_score, k=max(top_ks))
         # Check if the ranked items are in the label interactions
         relevance = [[item in label for item in ranked.tolist()]
                      for ranked, label in zip(ranked_items, label_inter)]
-        relevance = np.array(relevance, dtype=np.float32)
+        relevance = np.array(relevance, dtype=np.float64)
         # Calculate metrics
         for i, metric in enumerate(metrics):
             for j, k in enumerate(top_ks):
@@ -49,3 +54,19 @@ def test(model, test_dataloader, metrics, top_ks):
     logging.info(header)
     logging.info(values)
     logging.info('')
+
+    for metric_name in ("recall", "ndcg"):
+        if metric_name not in metrics or 20 not in top_ks:
+            continue
+        metric_idx = metrics.index(metric_name)
+        k_idx = top_ks.index(20)
+        display_name = {"recall": "Recall", "ndcg": "NDCG"}[metric_name]
+        print(f"{display_name}@20: {result[metric_idx, k_idx]:.10f}")
+
+    return {
+        metric: {
+            k: float(result[metric_idx, k_idx])
+            for k_idx, k in enumerate(top_ks)
+        }
+        for metric_idx, metric in enumerate(metrics)
+    }

@@ -25,22 +25,42 @@ pip install -r requirements.txt
 ```
 
 ## How to run
-- Run LAE with DAN
+The local adaptation uses the common TrainingFreeRecSys weak-generalization
+splits rather than the upstream `valid_in.txt`/`test_in.txt` protocol:
+
+```bash
+TFRECSYS_DATA_ROOT=../../data/split_dataset/00_dataset_seed_2020 \
+TFRECSYS_EVAL_FILE=test.txt \
+python code/main.py --dataset gowalla --seed 2020 --model EASE_DAN \
+  --reg_p 20 --alpha 0.2 --beta 0.3 --drop_p 0.6
 ```
-sh dan_lae.sh
+
+Run through the common sweep framework:
+
+```bash
+cd ..
+python run_sweep.py --models DAN --datasets gowalla --seeds 2020 \
+  --verify_max_combinations 1
 ```
-- Run EASE with DAN
-```
-sh dan_ease.sh
-```
-- Run RLAE with DAN
-```
-sh dan_rlae.sh
-```
+
+`EASE_DAN` is the sweep default. `LAE_DAN` and `RLAE_DAN` remain available
+through `--model`. The bundled upstream datasets were removed. The loader now
+reads `train.txt` and the file selected by `TFRECSYS_EVAL_FILE` from
+`TFRECSYS_DATA_ROOT/<dataset>/`. Evaluation masks training interactions and
+reports the same user-averaged Recall@20 and binary-relevance NDCG@20
+definitions used by `EigendecompositionMF/code/model.py`.
+
+`--solver auto` uses the upstream dense closed-form calculation on ordinary
+catalogs and switches `EASE_DAN` to an algebraically equivalent Woodbury dual
+solver when the item catalog is much larger than the user set. `--solver
+primal` and `--solver dual` can be used to select either implementation
+explicitly.
+
+Adapted from upstream commit
+`fc28a9542f141d13f495d5529aa3f2c486961356`.
 
 ## TODO
 - [ ] Add the ML-20M, Netflix, and MSD datasets
-- [ ] Add weak generalization protocol
 
 
 ## Citation

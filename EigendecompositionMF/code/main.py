@@ -95,78 +95,17 @@ try:
 
 
 
-    def Energy(A, k):
-        """Return the fractional rank-k energy of matrix A."""
-        if k <= 0:
-            return 0.0
-        if hasattr(A, "multiply"):
-            from scipy.sparse.linalg import svds
-            total_energy = float(A.multiply(A).sum())
-            if total_energy == 0:
-                return 0.0
-            k = min(int(k), min(A.shape) - 1)
-            if k <= 0:
-                return 0.0
-            singular_values = svds(A.astype("float32"), k=k, return_singular_vectors=False)
-            top_k_energy = float((singular_values ** 2).sum())
-            return top_k_energy / total_energy
-        if hasattr(A, "toarray"):
-            A = A.toarray()
-        A = torch.as_tensor(A, dtype=torch.float32, device=world.device)
-        singular_values = torch.linalg.svdvals(A)
-        total_energy = torch.sum(singular_values ** 2)
-        if total_energy == 0:
-            return 0.0
-        k = min(int(k), singular_values.numel())
-        top_k_energy = torch.sum(singular_values[:k] ** 2)
-        return float((top_k_energy / total_energy).detach().cpu())
-
-    def PlotEnergy(A, max_k, output_file=None):
-        if max_k < 32:
-            raise ValueError("max_k must be at least 32.")
-        k_values = list(range(32, int(max_k) + 1, 32))
-        energy_values = [Energy(A, k) for k in k_values]
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        if output_file is None:
-            plot_dir = os.path.join(os.path.dirname(__file__), "plots")
-            os.makedirs(plot_dir, exist_ok=True)
-            output_file = os.path.join(
-                plot_dir,
-                f"{dataset_name}_energy_seed_{world.seed}_k_{int(max_k)}.png",
-            )
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(k_values, energy_values, marker="o", linewidth=2)
-        ax.set_xlabel("k")
-        ax.set_ylabel("Fractional energy")
-        ax.set_title(f"{dataset_name} fractional energy")
-        ax.grid(True, alpha=0.3)
-        ax.set_ylim(0, 1.02)
-        fig.tight_layout()
-        fig.savefig(output_file, dpi=200)
-        plt.close(fig)
-        return k_values, energy_values, output_file
-
-
-
     print()
     import dataloader
     import model
     import tmp
-    dataset = dataloader.Loader(path=dataset_path)
+    dataset = tmp.load_dataset_split(dataloader.Loader, dataset_path, "test.txt")
     Recmodel = model.PSEmodel(world.config, dataset)
-    PlotEnergy(Recmodel.A, Recmodel.k, output_file="Plot_A")
-    PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.1,alpha2=0.1), Recmodel.k, output_file="Plot_A_tilde_01")
-    PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.5,alpha2=0.5), Recmodel.k, output_file="Plot_A_tilde_05")
-    PlotEnergy(Recmodel.getNormAdj(Recmodel.A,Recmodel.D_inv,alpha1=0.2,alpha2=0.4), Recmodel.k, output_file="Plot_A_norm")
     
-    sgfcf_params = tmp.get_sgfcf_params(dataset_name, Recmodel.k)
-    filter_models = tmp.build_filter_models(Recmodel, sgfcf_params)
-    filter_results = tmp.evaluate_filter_models(filter_models, dataset)
-    world.cprint(f"SGFCF parameters: {sgfcf_params}")
-    for filter_name, result in filter_results.items():
-        world.cprint(f"{filter_name} filter: {result}")
+
+
+
+    
 
 finally:
     if world.tensorboard:

@@ -89,6 +89,12 @@ class IdealFilter(nn.Module):
     
     def fit(self, inter):
         norm_inter = get_norm_inter(inter)
+        max_rank = min(norm_inter.shape)
+        if self.threshold >= max_rank:
+            raise ValueError(
+                f"eta must be smaller than min(num_users, num_items)={max_rank}; "
+                f"received eta={self.threshold}."
+            )
         _, _, vt = svds(norm_inter, which='LM', k=self.threshold)
         ideal_pass = torch.tensor(vt.T.copy())
         self.register_buffer('ideal_pass', ideal_pass) # shape (num_items, threshold)

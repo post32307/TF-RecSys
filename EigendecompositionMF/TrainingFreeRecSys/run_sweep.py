@@ -112,6 +112,14 @@ MODELS = {
     'SGFCF': {
         'cwd': os.path.join(BASE_DIR, 'SGFCF'),
         'cmd': [sys.executable, 'sgfcf.py']
+    },
+    'ChebyCF': {
+        'cwd': os.path.join(BASE_DIR, 'ChebyCF'),
+        'cmd': [sys.executable, 'main.py']
+    },
+    'DAN': {
+        'cwd': os.path.join(BASE_DIR, 'DAN', 'code'),
+        'cmd': [sys.executable, 'main.py']
     }
 }
 
@@ -189,6 +197,20 @@ PARAM_GRIDS = {
             for base in SGFCF_BASE_COMBOS
             for k in RANK_GRID
         ],
+    },
+    'ChebyCF': {
+        'K': [8,32],
+        'phi': [1.5, 10.0, 15.0],
+        'eta': [256, 512],
+        'alpha': [0.1, 0.2],
+        'beta': [0.2, 0.4],
+    },
+    'DAN': {
+        'model': ['RLAE_DAN'],
+        'reg_p': [10.0, 20.0, 50.0],
+        'alpha': [0.2, 0.3],
+        'beta': [0.2, 0.3],
+        'drop_p': [0.4, 0.6, 0.7],
     }
 }
 
@@ -261,6 +283,20 @@ def parse_metrics(log_file, model_name):
     elif model_name == 'PGSP':
         m_recall = list(re.finditer(r"Recall@20:\s*([+-]?\d*\.?\d+(?:[eE][-+]?\d+)?)", content))
         m_ndcg = list(re.finditer(r"NDCG@20:\s*([+-]?\d*\.?\d+(?:[eE][-+]?\d+)?)", content))
+        if m_recall:
+            metrics['Recall@20'] = m_recall[-1].group(1)
+        if m_ndcg:
+            metrics['NDCG@20'] = m_ndcg[-1].group(1)
+
+    elif model_name in ['ChebyCF', 'DAN']:
+        m_recall = list(re.finditer(
+            r"Recall@20:\s*([+-]?\d*\.?\d+(?:[eE][-+]?\d+)?)",
+            content,
+        ))
+        m_ndcg = list(re.finditer(
+            r"NDCG@20:\s*([+-]?\d*\.?\d+(?:[eE][-+]?\d+)?)",
+            content,
+        ))
         if m_recall:
             metrics['Recall@20'] = m_recall[-1].group(1)
         if m_ndcg:

@@ -20,12 +20,27 @@ conda install numpy==1.22.4 scipy==1.9.3 pyyaml tqdm
 
 ## Run
 ```bash
-# Execution with command-line arguments
-python main.py --model chebycf --dataset last-fm --K 8 --phi 15 --eta 256 --alpha 0.1 --beta 0.2
+# Run against a TrainingFreeRecSys seeded split
+TFRECSYS_DATA_ROOT=../../data/split_dataset/00_dataset_seed_2020 \
+TFRECSYS_EVAL_FILE=test.txt \
+python main.py --dataset lastfm --seed 2020 --K 8 --phi 15 \
+  --eta 256 --alpha 0.1 --beta 0.2
 
-# Execution with a configuration file
-python main.py --config chebycf_last-fm
+# Run through the common sweep framework
+cd ..
+python run_sweep.py --models ChebyCF --datasets lastfm --seeds 2020 \
+  --verify_max_combinations 1
 ```
+
+The bundled upstream datasets were removed. The adapted loader reads
+`train.txt` and the file selected by `TFRECSYS_EVAL_FILE` from
+`TFRECSYS_DATA_ROOT/<dataset>/`, matching the other models in
+`TrainingFreeRecSys`. Evaluation masks training interactions and reports the
+same user-averaged Recall@20 and binary-relevance NDCG@20 definitions used by
+`EigendecompositionMF/code/model.py`.
+
+Adapted from upstream commit
+`6961667fa45132dfe396df8be45fa49021037a03`.
 
 ## Performance
 <p align="center">
