@@ -21,3 +21,8 @@
 (test) | news                 | seed=2026 | recall=[0.219848], precision=[0.021828], ndcg=[0.103818] | epochs=830 | parameters=(recdim=128, lr=0.001, decay=0.0001, layer=4, bpr_batch=2048, topks=[20]) | runtime=14536.05s | split_path=../data/split_dataset/00_dataset_seed_2026/news
 (test) | movielens            | seed=2026 | recall=[0.270412], precision=[0.148331], ndcg=[0.252646] | epochs=200 | parameters=(recdim=128, lr=0.001, decay=0.0001, layer=4, bpr_batch=2048, topks=[20]) | runtime=31071.31s | split_path=../data/split_dataset/00_dataset_seed_2026/movielens
 (test) | gowalla              | seed=2026 | recall=[0.217037], precision=[0.026369], ndcg=[0.124624] | epochs=900 | parameters=(recdim=128, lr=0.001, decay=0.0001, layer=2, bpr_batch=2048, topks=[20]) | runtime=102523.63s | split_path=../data/split_dataset/00_dataset_seed_2026/gowalla
+(test) | yelp2018             | seed=2026 | recall=[0.103416], precision=[0.021252], ndcg=[0.063235] | epochs=710 | parameters=(recdim=128, lr=0.001, decay=0.0001, layer=4, bpr_batch=2048, topks=[20]) | runtime=25087.05s | split_path=../data/split_dataset/00_dataset_seed_2026/yelp2018
+
+
+(test) | amazon-electronics   | seed=42 | recall=[0.127506], precision=[0.014251], ndcg=[0.069959] | epochs=100 | parameters=(recdim=128, lr=0.001, decay=1e-05, layer=2, bpr_batch=2048, topks=[20]) | runtime=69.07s | split_path=../data/split_dataset/00_dataset_seed_42/amazon-electronics
+(test) | lastfm               | seed=42 | recall=[0.297432], precision=[0.035540], ndcg=[0.169737] | epochs=540 | parameters=(recdim=128, lr=0.001, decay=1e-05, layer=4, bpr_batch=2048, topks=[20]) | runtime=627.85s | split_path=../data/split_dataset/00_dataset_seed_42/lastfm

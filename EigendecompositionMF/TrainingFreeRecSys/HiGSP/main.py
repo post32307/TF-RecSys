@@ -44,9 +44,19 @@ def main():
     test_metrics = lm.eval_test(test_user_items_dict, ratings)
 
     (best_recalls, best_f1s, best_mrrs, best_ndcgs) = test_metrics
+    topk_to_index = {k: index for index, k in enumerate(lm.topks)}
+    missing_topks = {10, 20}.difference(topk_to_index)
+    if missing_topks:
+        raise ValueError(
+            f"HiGSP evaluation must include top-k values 10 and 20; "
+            f"received {lm.topks}"
+        )
+    index_10 = topk_to_index[10]
+    index_20 = topk_to_index[20]
     test_metric_info = '\tRecall@10:{:.4f}\tF1@10:{:.4f}\tMRR@10:{:.4f}\tNDCG@10:{:.4f}\n' \
                        '\tRecall@20:{:.4f}\tF1@20:{:.4f}\tMRR@20:{:.4f}\tNDCG@20:{:.4f}'.format(
-        best_recalls[0], best_f1s[0], best_mrrs[0], best_ndcgs[0], best_recalls[1], best_f1s[1], best_mrrs[1], best_ndcgs[1])
+        best_recalls[index_10], best_f1s[index_10], best_mrrs[index_10], best_ndcgs[index_10],
+        best_recalls[index_20], best_f1s[index_20], best_mrrs[index_20], best_ndcgs[index_20])
     print('[Test]\n{}'.format(test_metric_info))
 
 

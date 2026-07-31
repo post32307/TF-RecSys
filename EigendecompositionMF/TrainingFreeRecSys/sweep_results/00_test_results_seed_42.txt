@@ -5,6 +5,7 @@ Wed Jul  8 07:31:48 2026 : BSPM / epinions
 Wed Jul  8 17:39:18 2026 : BSPM / epinions
 Wed Jul  8 21:36:58 2026 : BSPM / epinions
 Sun Jul 12 17:11:26 2026 : BSPM / yelp2018
+Thu Jul 30 20:02:13 2026 : ChebyCF / amazon-electronics
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
@@ -84,3 +85,25 @@ GF-CF      | yelp2018             | (Test) Recall@20: 0.106143, NDCG@20: 0.06587
 PGSP       | yelp2018             | (Test) Recall@20: 0.103, NDCG@20: 0.0639                     | 00:39    | k=512, phi=0.0
 TurboCF    | yelp2018             | (Test) Recall@20: 0.1024, NDCG@20: 0.0635                    | 11:03    | alpha=0.7, power=1.0, filter=2
 SGFCF      | yelp2018             | (Test) Recall@20: 0.1159, NDCG@20: 0.0726                    | 01:11    | k=512, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
+
+ChebyCF    | amazon-electronics   | (Test) Recall@20: 0.13983, NDCG@20: 0.0777416                | 00:02    | K=8, phi=1.5, eta=512, alpha=0.1, beta=0.2
+
+ChebyCF    | lastfm               | (Test) Recall@20: 0.295397, NDCG@20: 0.16774                 | 00:02    | K=8, phi=1.5, eta=256, alpha=0.1, beta=0.2
+
+ChebyCF    | citeulike            | (Test) Recall@20: 0.29852, NDCG@20: 0.21359                  | 00:06    | K=32, phi=15.0, eta=512, alpha=0.2, beta=0.2
+
+ChebyCF    | epinions             | (Test) Recall@20: 0.0582842, NDCG@20: 0.0303232              | 00:25    | K=8, phi=1.5, eta=512, alpha=0.2, beta=0.4
+
+ChebyCF    | yelp                 | (Test) Recall@20: 0.106565, NDCG@20: 0.0556494               | 00:26    | K=32, phi=1.5, eta=512, alpha=0.1, beta=0.2
+
+ChebyCF    | douban-book          | (Test) Recall@20: 0.208141, NDCG@20: 0.150563                | 00:07    | K=8, phi=15.0, eta=256, alpha=0.2, beta=0.2
+
+ChebyCF    | amazon-CD            | (Test) Recall@20: 0.0951675, NDCG@20: 0.0459947              | 00:52    | K=8, phi=1.5, eta=512, alpha=0.2, beta=0.4
+
+ChebyCF    | news                 | (Test) Recall@20: 0.229021, NDCG@20: 0.114176                | 00:31    | K=8, phi=10.0, eta=512, alpha=0.2, beta=0.2
+
+ChebyCF    | movielens            | (Test) Recall@20: 0.284237, NDCG@20: 0.264517                | 00:08    | K=32, phi=15.0, eta=256, alpha=0.2, beta=0.2
+
+ChebyCF    | gowalla              | (Test) Recall@20: 0.230058, NDCG@20: 0.132688                | 01:05    | K=32, phi=1.5, eta=512, alpha=0.1, beta=0.2
+
+ChebyCF    | yelp2018             | (Test) Recall@20: 0.106409, NDCG@20: 0.0661959               | 01:29    | K=32, phi=1.5, eta=512, alpha=0.2, beta=0.2

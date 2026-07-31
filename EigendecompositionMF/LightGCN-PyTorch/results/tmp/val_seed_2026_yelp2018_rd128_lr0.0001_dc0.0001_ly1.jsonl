@@ -1,1 +1,0 @@
-{"mode": "val", "line": "(val) | yelp2018             | seed=2026 | recall=[0.090516], precision=[0.018858], ndcg=[0.055235] | epochs=860 | parameters=(recdim=128, lr=0.0001, decay=0.0001, layer=1, bpr_batch=2048, topks=[20]) | runtime=81669.27s | split_path=../data/split_dataset/00_dataset_seed_2026/yelp2018\n"}

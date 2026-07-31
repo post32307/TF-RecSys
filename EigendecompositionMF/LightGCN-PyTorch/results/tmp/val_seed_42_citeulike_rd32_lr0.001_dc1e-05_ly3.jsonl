@@ -1,0 +1,1 @@
+{"mode": "val", "line": "(val) | citeulike            | seed=42 | recall=[0.213237], precision=[0.048688], ndcg=[0.137607] | epochs=510 | parameters=(recdim=32, lr=0.001, decay=1e-05, layer=3, bpr_batch=2048, topks=[20]) | runtime=1204.72s | split_path=../data/split_dataset/00_dataset_seed_42/citeulike\n"}

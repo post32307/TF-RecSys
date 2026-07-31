@@ -7,6 +7,12 @@ Fri Jul  3 16:07:05 2026 : BSPM / news
 Sat Jul  4 09:50:09 2026 : BSPM / gowalla
 Thu Jul 30 12:21:13 2026 : DAN / amazon-electronics
 Thu Jul 30 12:26:26 2026 : DAN / citeulike
+Thu Jul 30 12:30:51 2026 : DAN / citeulike
+Thu Jul 30 13:19:54 2026 : DAN / epinions
+Thu Jul 30 17:54:44 2026 : ChebyCF / epinions
+Fri Jul 31 09:57:16 2026 : HiGSP / amazon-electronics
+Fri Jul 31 10:34:41 2026 : HiGSP / amazon-electronics
+Fri Jul 31 10:46:27 2026 : HiGSP / amazon-electronics
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
@@ -87,8 +93,26 @@ PGSP       | yelp2018             | (Test) Recall@20: 0.1046, NDCG@20: 0.0654   
 TurboCF    | yelp2018             | (Test) Recall@20: 0.1044, NDCG@20: 0.0656                    | 10:59    | alpha=0.5, power=1.0, filter=2
 SGFCF      | yelp2018             | (Test) Recall@20: 0.1165, NDCG@20: 0.0737                    | 01:04    | k=512, beta_1=0.9, beta_2=1.0, alpha=0.0, eps=0.37, gamma=0.3
 
-DAN        | amazon-electronics   | (Test) Recall@20: 0.13646, NDCG@20: 0.0776844                | 00:00    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.3, drop_p=0.6
 ChebyCF    | amazon-electronics   | (Test) Recall@20: 0.137708, NDCG@20: 0.075645                | 00:02    | K=8, phi=1.5, eta=256, alpha=0.1, beta=0.2
 
-DAN        | lastfm               | (Test) Recall@20: 0.282465, NDCG@20: 0.169188                | 00:02    | model=RLAE_DAN, reg_p=50.0, alpha=0.3, beta=0.3, drop_p=0.7
 ChebyCF    | lastfm               | (Test) Recall@20: 0.281787, NDCG@20: 0.166162                | 00:02    | K=8, phi=1.5, eta=256, alpha=0.2, beta=0.2
+
+ChebyCF    | citeulike            | (Test) Recall@20: 0.302747, NDCG@20: 0.22084                 | 00:05    | K=32, phi=15.0, eta=512, alpha=0.2, beta=0.2
+
+ChebyCF    | epinions             | (Test) Recall@20: 0.0598766, NDCG@20: 0.0317503              | 00:30    | K=32, phi=1.5, eta=512, alpha=0.2, beta=0.4
+
+ChebyCF    | yelp                 | (Test) Recall@20: 0.105867, NDCG@20: 0.0547095               | 00:26    | K=32, phi=1.5, eta=512, alpha=0.1, beta=0.2
+
+ChebyCF    | douban-book          | (Test) Recall@20: 0.209572, NDCG@20: 0.150026                | 00:07    | K=8, phi=15.0, eta=256, alpha=0.2, beta=0.2
+
+ChebyCF    | amazon-CD            | (Test) Recall@20: 0.0967001, NDCG@20: 0.0461166              | 00:52    | K=8, phi=1.5, eta=512, alpha=0.2, beta=0.4
+
+ChebyCF    | news                 | (Test) Recall@20: 0.233045, NDCG@20: 0.116916                | 00:31    | K=8, phi=10.0, eta=512, alpha=0.1, beta=0.2
+
+ChebyCF    | movielens            | (Test) Recall@20: 0.280714, NDCG@20: 0.263044                | 00:08    | K=32, phi=15.0, eta=256, alpha=0.2, beta=0.2
+
+ChebyCF    | gowalla              | (Test) Recall@20: 0.228575, NDCG@20: 0.132937                | 01:05    | K=32, phi=1.5, eta=512, alpha=0.1, beta=0.2
+
+ChebyCF    | yelp2018             | (Test) Recall@20: 0.1086, NDCG@20: 0.0676469                 | 01:28    | K=32, phi=1.5, eta=512, alpha=0.2, beta=0.2
+
+HiGSP      | amazon-electronics   | (Test) Recall@20: 0.1215, NDCG@20: 0.0698                    | 00:07    | alpha1=0.3, alpha2=0.9, order1=8, order2=4, pri_factor=64
