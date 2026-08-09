@@ -1,1 +1,0 @@
-{"mode": "val", "line": "(val) | epinions             | seed=42 | recall=[0.062433], precision=[0.007718], ndcg=[0.032609] | epochs=340 | parameters=(recdim=32, lr=0.001, decay=0.0001, layer=4, bpr_batch=2048, topks=[20]) | runtime=11955.79s | split_path=../data/split_dataset/00_dataset_seed_42/epinions\n"}

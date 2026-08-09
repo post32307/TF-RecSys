@@ -6,6 +6,7 @@ Sun Jul  5 18:33:49 2026 : BSPM / epinions
 Mon Jul  6 08:37:39 2026 : BSPM / yelp
 Mon Jul  6 15:04:35 2026 : BSPM / amazon-CD
 Thu Jul 30 18:56:41 2026 : ChebyCF / amazon-electronics
+Tue Aug  4 10:47:25 2026 : DAN / amazon-electronics
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
@@ -107,3 +108,25 @@ ChebyCF    | movielens            | (Test) Recall@20: 0.287045, NDCG@20: 0.26685
 ChebyCF    | gowalla              | (Test) Recall@20: 0.232515, NDCG@20: 0.133779                | 01:05    | K=32, phi=1.5, eta=512, alpha=0.1, beta=0.2
 
 ChebyCF    | yelp2018             | (Test) Recall@20: 0.106311, NDCG@20: 0.065634                | 01:30    | K=32, phi=1.5, eta=512, alpha=0.2, beta=0.2
+
+DAN        | amazon-electronics   | (Test) Recall@20: 0.149059, NDCG@20: 0.0848455               | 00:00    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.3, drop_p=0.7
+
+DAN        | lastfm               | (Test) Recall@20: 0.28658, NDCG@20: 0.167989                 | 00:02    | model=RLAE_DAN, reg_p=20.0, alpha=0.2, beta=0.3, drop_p=0.6
+
+DAN        | citeulike            | (Test) Recall@20: 0.313092, NDCG@20: 0.224185                | 01:12    | model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.3, drop_p=0.6
+
+DAN        | epinions             | (Test) Recall@20: 0.0876468, NDCG@20: 0.0496026              | 24:01    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.3, drop_p=0.7
+
+DAN        | yelp                 | (Test) Recall@20: 0.130148, NDCG@20: 0.0690774               | 02:36    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.3, drop_p=0.6
+
+DAN        | douban-book          | (Test) Recall@20: 0.234074, NDCG@20: 0.168577                | 02:44    | model=RLAE_DAN, reg_p=10.0, alpha=0.3, beta=0.3, drop_p=0.4
+
+DAN        | amazon-CD            | (Test) Recall@20: 0.127864, NDCG@20: 0.0644627               | 10:15    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.3, drop_p=0.6
+
+DAN        | news                 | (Test) Recall@20: 0.239293, NDCG@20: 0.119947                | 02:34    | model=RLAE_DAN, reg_p=50.0, alpha=0.2, beta=0.2, drop_p=0.4
+
+DAN        | movielens            | (Test) Recall@20: 0.287711, NDCG@20: 0.268369                | 00:03    | model=RLAE_DAN, reg_p=50.0, alpha=0.3, beta=0.2, drop_p=0.4
+
+DAN        | gowalla              | (Test) Recall@20: 0.244034, NDCG@20: 0.142783                | 16:10    | model=RLAE_DAN, reg_p=20.0, alpha=0.2, beta=0.3, drop_p=0.6
+
+DAN        | yelp2018             | (Test) Recall@20: 0.108234, NDCG@20: 0.0684543               | 12:52    | model=RLAE_DAN, reg_p=50.0, alpha=0.3, beta=0.3, drop_p=0.7

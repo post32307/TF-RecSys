@@ -101,12 +101,135 @@ try:
     import tmp
     dataset = tmp.load_dataset_split(dataloader.Loader, dataset_path, "test.txt")
     Recmodel = model.PSEmodel(world.config, dataset)
-    
 
+    # ---------------------------------------------------------
+    # 2. Validation / hyperparameter selection
+    # ---------------------------------------------------------
+    base_params = tmp.default_params(dataset_name, Recmodel.k)
+    best_configs = {
+        "original": {"params": dict(base_params)},
+        "three_component": {
+            "params": dict(base_params),
+            "mid_coefficient": 0.1,
+            "high_coefficient": 0.1,
+        },
+        "two_component": {
+            "params": dict(base_params),
+            "low_coefficient": 1.0,
+            "high_coefficient": 1.0,
+        },
+        "generalized_normalization": {
+            "params": dict(base_params),
+            "normalization": dict(
+                tmp.ASYMMETRIC_NORMALIZATION_SPACE[0]
+            ),
+        },
+    }
+    validation_results = None
+    shared_homophily = tmp.compute_homophily(Recmodel)
 
+    if val_true in (1, 2):
+        search_file = "val.txt" if val_true == 1 else "test.txt"
+        if search_file == "test.txt":
+            search_dataset, search_model = dataset, Recmodel
+        else:
+            search_dataset = tmp.load_dataset_split(
+                dataloader.Loader, dataset_path, search_file
+            )
+            search_model = model.PSEmodel(world.config, search_dataset)
+        search_homophily = shared_homophily
+        if search_model.R.shape != Recmodel.R.shape:
+            search_homophily = tmp.compute_homophily(search_model)
+        best_configs, validation_results = tmp.search(
+            search_model, search_dataset, homophily=search_homophily
+        )
 
-    
+        world.cprint(f"Hyperparameter search split: {search_file}")
+        for model_name, result in validation_results.items():
+            world.cprint(f"{model_name} validation: {result}")
 
+    # ---------------------------------------------------------
+    # 3. Final test of all four SGFCF models
+    # ---------------------------------------------------------
+    test_homophily = shared_homophily
+    component_cache = {}
+    test_results = {}
+    for model_name, config in best_configs.items():
+        params = config["params"]
+        normalization = config.get("normalization")
+        if model_name == "three_component":
+            spectrum = "three_bands"
+        elif model_name == "two_component":
+            spectrum = "two_bands"
+        elif model_name == "original":
+            spectrum = "largest_edge"
+        else:
+            spectrum = "largest"
+        if normalization is None:
+            component_key = (
+                "symmetric",
+                spectrum,
+                params["alpha"],
+                params["eps"],
+                Recmodel.k,
+            )
+        else:
+            component_key = (
+                "generalized",
+                normalization["alpha_1"],
+                normalization["eps_1"],
+                normalization["alpha_2"],
+                normalization["eps_2"],
+                Recmodel.k,
+            )
+        if component_key not in component_cache:
+            three_component_key = (
+                "symmetric", "three_bands",
+                params["alpha"], params["eps"], Recmodel.k,
+            )
+            can_reuse_three_bands = (
+                spectrum == "two_bands"
+                and three_component_key in component_cache
+                and 3 * int(Recmodel.k) <= min(Recmodel.R.shape)
+            )
+            if can_reuse_three_bands:
+                component_cache[component_key] = tmp.select_spectral_bands(
+                    component_cache[three_component_key],
+                    (tmp.BAND_LOW, tmp.BAND_HIGH),
+                )
+            else:
+                component_cache[component_key] = tmp.compute_components(
+                    Recmodel,
+                    params,
+                    normalization=normalization,
+                    spectrum=spectrum,
+                )
+
+        if model_name == "three_component":
+            sgfcf_model = tmp.SGFCFModel(
+                Recmodel,
+                params,
+                mid_coefficient=config["mid_coefficient"],
+                high_coefficient=config["high_coefficient"],
+                spectrum="three_bands",
+            )
+        elif model_name == "two_component":
+            sgfcf_model = tmp.TwoComponentSGFCFModel(
+                Recmodel,
+                params,
+                low_coefficient=config["low_coefficient"],
+                high_coefficient=config["high_coefficient"],
+            )
+        else:
+            sgfcf_model = tmp.SGFCFModel(Recmodel, params)
+        test_results[model_name] = tmp.evaluate(
+            sgfcf_model,
+            dataset,
+            components=component_cache[component_key],
+            homophily=test_homophily,
+        )
+        world.cprint(f"{model_name} best parameters: {config}")
+        world.cprint(f"{model_name} test: {test_results[model_name]}")
 finally:
     if world.tensorboard:
         w.close()

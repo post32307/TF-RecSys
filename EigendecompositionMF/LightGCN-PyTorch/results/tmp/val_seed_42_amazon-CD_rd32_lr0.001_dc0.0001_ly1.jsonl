@@ -1,1 +1,0 @@
-{"mode": "val", "line": "(val) | amazon-CD            | seed=42 | recall=[0.068512], precision=[0.006930], ndcg=[0.031715] | epochs=660 | parameters=(recdim=32, lr=0.001, decay=0.0001, layer=1, bpr_batch=2048, topks=[20]) | runtime=9844.52s | split_path=../data/split_dataset/00_dataset_seed_42/amazon-CD\n"}
