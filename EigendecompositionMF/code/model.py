@@ -13,7 +13,33 @@ import multiprocessing
 
 import torch.nn as nn
 
-class PSEmodel:
+
+def _threshold_offdiag_graph(matrix):
+    graph = matrix.tocsr(copy=True)
+    graph.setdiag(0)
+    graph.eliminate_zeros()
+    graph.data[graph.data <= 1] = 0
+    graph.eliminate_zeros()
+    graph.data = np.ones(graph.nnz, dtype=np.int8)
+    return graph
+
+
+def _induced_edges(graph, nodes, marker, stamp):
+    if len(nodes) <= 1:
+        return 0, stamp
+    stamp += 1
+    if stamp == np.iinfo(marker.dtype).max:
+        marker.fill(0)
+        stamp = 1
+    marker[nodes] = stamp
+    count = 0
+    for node in nodes:
+        neighbors = graph.indices[graph.indptr[node]:graph.indptr[node + 1]]
+        count += np.count_nonzero(marker[neighbors] == stamp)
+    return count, stamp
+
+
+class TFmodel:
     def __init__(self, config: dict, dataset: BasicDataset):
         self.config = config
         self.dataset = dataset
@@ -30,15 +56,81 @@ class PSEmodel:
         self.D = sp.diags(rowsum) #CSR
         self.D_inv = sp.diags(1. / rowsum) #CSR
 
+    
+
+    # Model Functions
+
+    def compute_homophily(self):
+        """Compute SGFCF user/item homophily ratios."""
+        R = self.R.astype(np.float32).tocsr()
+        R_csc = R.tocsc()
+        item_graph = _threshold_offdiag_graph(R.T.dot(R))
+        user_graph = _threshold_offdiag_graph(R.dot(R.T))
+        user_ratio = np.zeros(R.shape[0], dtype=np.float32)
+        marker = np.zeros(R.shape[1], dtype=np.int32)
+        stamp = 0
+        for user in range(R.shape[0]):
+            nodes = R[user].indices
+            edges, stamp = _induced_edges(item_graph, nodes, marker, stamp)
+            if len(nodes) > 1:
+                user_ratio[user] = edges / (len(nodes) * (len(nodes) - 1))
+        item_ratio = np.zeros(R.shape[1], dtype=np.float32)
+        marker = np.zeros(R.shape[0], dtype=np.int32)
+        stamp = 0
+        for item in range(R.shape[1]):
+            nodes = R_csc[:, item].indices
+            edges, stamp = _induced_edges(user_graph, nodes, marker, stamp)
+            if len(nodes) > 1:
+                item_ratio[item] = edges / (len(nodes) * (len(nodes) - 1))
+        return (torch.as_tensor(user_ratio, dtype=torch.float32, device=self.device),
+                torch.as_tensor(item_ratio, dtype=torch.float32, device=self.device))
+
+    def individual_weight(self, value, homophily, beta_1=1.0, beta_2=1.0):
+        """Compute the SGFCF adaptive eigenvalue response."""
+        value = value if torch.is_tensor(value) else torch.as_tensor(value, dtype=torch.float32, device=self.device)
+        homophily = homophily if torch.is_tensor(homophily) else torch.as_tensor(homophily, dtype=torch.float32, device=self.device)
+        minimum, maximum = homophily.min(), homophily.max()
+        if torch.isclose(minimum, maximum).item():
+            exponent = torch.ones_like(homophily) * float(beta_1)
+        else:
+            exponent = ((float(beta_2) - float(beta_1)) * homophily / (maximum - minimum)
+                        + (maximum * float(beta_1) - float(beta_2) * minimum)
+                        / (maximum - minimum))
+        return value.unsqueeze(0).pow(exponent.unsqueeze(1))
+
+    def fit_dan(self, model="RLAE_DAN", reg_p=20.0, alpha=0.2,
+                beta=0.3, drop_p=0.6, xi=0.1):
+        """Fit the standalone DAN primal solution on this model's R."""
+        if model not in {"LAE_DAN", "EASE_DAN", "RLAE_DAN"}:
+            raise ValueError(f"Unknown DAN model: {model}")
+        X = self.R.astype(np.float64).tocsr()
+        item_counts = np.asarray(X.sum(axis=0)).ravel()
+        user_counts = np.asarray(X.sum(axis=1)).ravel()
+        safe_users = np.maximum(user_counts, 1.0)
+        regularization = float(reg_p) + float(drop_p) / (1.0 - float(drop_p)) * item_counts
+        gram = X.multiply(np.power(safe_users, -float(beta))[:, None]).T.dot(X).toarray()
+        diagonal = np.diag_indices(gram.shape[0])
+        gram[diagonal] += regularization
+        precision = np.linalg.inv(gram)
+        diag_precision = np.diag(precision)
+        if model == "EASE_DAN":
+            base = np.eye(len(diag_precision)) - precision / diag_precision
+        elif model == "LAE_DAN":
+            base = np.eye(len(diag_precision)) - precision * regularization
+        else:
+            condition = (1.0 - regularization * diag_precision) > float(xi)
+            lagrangian = ((1.0 - float(xi)) / diag_precision - regularization) * condition
+            base = np.eye(len(diag_precision)) - precision * (regularization + lagrangian)
+        safe_items = np.maximum(item_counts, 1.0)
+        weights = base * np.power(safe_items, float(alpha)).reshape(-1, 1)
+        weights *= np.power(safe_items, -float(alpha))
+        weights[diagonal] = 0.0
+        return {"model": model, "weights": weights, "interactions": X,
+                "cold_items": item_counts == 0,
+                "params": {"reg_p": float(reg_p), "alpha": float(alpha),
+                           "beta": float(beta), "drop_p": float(drop_p), "xi": float(xi)}}
 
 
-    # PSE Functions
-
-    # 1.
-
-    # 2.
-
-    # 3.
 
 
 
@@ -47,6 +139,7 @@ class PSEmodel:
     def getNormAdj(self,A,D_inv,alpha1=0.2,alpha2=0.4):
         adj_norm = D_inv.power(alpha1) @ A @ D_inv.power(alpha2)
         return adj_norm
+
 
 
     # Embedding Functions
@@ -82,6 +175,7 @@ class PSEmodel:
         
         return U_L,U_R,Eigs
     
+
 
     # Evaluation Functions
 
@@ -190,7 +284,8 @@ class PSEmodel:
             if multicore == 1:
                 pool.close()
             return results
-    
+
+
 
     def Test_RatingMatrix(self, X, dataset, users=None, items=None, multicore=0):
         u_batch_size = world.config['test_u_batch_size']

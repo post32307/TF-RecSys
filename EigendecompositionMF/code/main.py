@@ -49,23 +49,18 @@ else:
     world.cprint("not enable tensorflowboard")
 
 try:
-    plot_true = 0
-    #   0: skip eigenvalue plotting and continue to the dataset-root setup
-    #   1: plot real eigenvalues, save to plots/, and terminate with sys.exit()
-    if plot_true not in (0, 1):
-        raise ValueError("plot_true must be 0 or 1.")
     
     val_true = 1
     #   0: no hyperparameter search; test default params on test.txt
     #   1: train on train.txt, search on val.txt, test on test.txt
-    #   2: train on train.txt, search on test.txt, test on test.txt
-    if val_true not in (0, 1, 2):
-        raise ValueError("val_true must be 0, 1, or 2.")
+    if val_true not in (0, 1):
+        raise ValueError("val_true must be 0 or 1.")
 
-    if plot_true == 1:
-        import temp_plot
-        temp_plot.plot_eigenvalues()
-        sys.exit()
+    fixed_k = 0
+    #   0: search over values of k
+    #   1: use the --k argument
+    if fixed_k not in (0, 1):
+        raise ValueError("fixed_k must be 0 or 1.")
 
 
 
@@ -85,13 +80,13 @@ try:
     if not os.path.isdir(dataset_path):
         raise FileNotFoundError(f"Dataset directory not found: {dataset_path}")
 
-    max_k = world.config["k"]
+    input_k = world.config["k"]
 
     world.cprint(f"Dataset root: {data_root}")
     world.cprint(f"Selected dataset: {dataset_name}")
     world.cprint(f"Dataset path: {dataset_path}")
     world.cprint(f"val_true: {val_true}")
-    world.cprint(f"max_k: {max_k}")
+    world.cprint(f"input k: {input_k}")
 
 
 
@@ -100,136 +95,101 @@ try:
     import model
     import tmp
     dataset = tmp.load_dataset_split(dataloader.Loader, dataset_path, "test.txt")
-    Recmodel = model.PSEmodel(world.config, dataset)
+    Recmodel = model.TFmodel(world.config, dataset)
+    spectral_dimension = min(Recmodel.R.shape)
+    if fixed_k == 1:
+        search_k_values = [int(input_k)]
+    else:
+        search_k_values = [
+            value for value in (16, 32, 64, 128, 256)
+            if value < spectral_dimension
+        ]
+        if not search_k_values:
+            search_k_values = [max(1, spectral_dimension - 1)]
+    world.cprint(f"fixed_k: {fixed_k}")
+    world.cprint(f"k candidates: {search_k_values}")
 
     # ---------------------------------------------------------
     # 2. Validation / hyperparameter selection
     # ---------------------------------------------------------
-    base_params = tmp.default_params(dataset_name, Recmodel.k)
-    best_configs = {
-        "original": {"params": dict(base_params)},
-        "three_component": {
-            "params": dict(base_params),
-            "mid_coefficient": 0.1,
-            "high_coefficient": 0.1,
-        },
-        "two_component": {
-            "params": dict(base_params),
-            "low_coefficient": 1.0,
-            "high_coefficient": 1.0,
-        },
-        "generalized_normalization": {
-            "params": dict(base_params),
-            "normalization": dict(
-                tmp.ASYMMETRIC_NORMALIZATION_SPACE[0]
-            ),
-        },
+    dan_dataset_params = {
+        **tmp.DAN_DEFAULT_PARAMS,
+        **tmp.DAN_DATASET_PARAMS.get(dataset_name, {}),
     }
-    validation_results = None
+    default_params = dict(tmp.SGFCF_SEARCH_SPACE[0])
+    default_params["k"] = int(input_k)
+    best_configs = {
+        "SGFCF": {"params": dict(default_params)},
+        "DAN": {"params": dict(default_params), "dan_params": {
+            **dan_dataset_params, "model": "RLAE_DAN"
+        }},
+        "SGFCF+DAN": {"params": dict(default_params), "dan_coefficient": 0.0,
+                       "dan_params": {**dan_dataset_params, "model": "RLAE_DAN"}},
+        "UnifiedNorm-SGFCF+DAN": {"params": dict(default_params), "dan_coefficient": 0.0,
+                                  "dan_params": {**dan_dataset_params, "model": "RLAE_DAN"}},
+    }
     shared_homophily = tmp.compute_homophily(Recmodel)
 
-    if val_true in (1, 2):
-        search_file = "val.txt" if val_true == 1 else "test.txt"
-        if search_file == "test.txt":
-            search_dataset, search_model = dataset, Recmodel
-        else:
-            search_dataset = tmp.load_dataset_split(
-                dataloader.Loader, dataset_path, search_file
-            )
-            search_model = model.PSEmodel(world.config, search_dataset)
+    if val_true == 1:
+        search_file = "val.txt"
+        search_dataset = tmp.load_dataset_split(
+            dataloader.Loader, dataset_path, search_file
+        )
+        search_model = model.TFmodel(world.config, search_dataset)
         search_homophily = shared_homophily
         if search_model.R.shape != Recmodel.R.shape:
             search_homophily = tmp.compute_homophily(search_model)
+        print()
         best_configs, validation_results = tmp.search(
-            search_model, search_dataset, homophily=search_homophily
+            search_model,
+            search_dataset,
+            homophily=search_homophily,
+            k_values=search_k_values,
+            dan_params=dan_dataset_params,
         )
-
+        print()
+        world.cprint("=== Validation / search results ===")
         world.cprint(f"Hyperparameter search split: {search_file}")
         for model_name, result in validation_results.items():
             world.cprint(f"{model_name} validation: {result}")
+        print()
 
     # ---------------------------------------------------------
-    # 3. Final test of all four SGFCF models
+    # 3. Final test of models
     # ---------------------------------------------------------
-    test_homophily = shared_homophily
-    component_cache = {}
     test_results = {}
-    for model_name, config in best_configs.items():
+    world.cprint(
+        f"=== Hyperparameter search concluded for dataset: {dataset_name} ==="
+    )
+    world.cprint("=== Final test results ===")
+    for model_name in ("SGFCF", "DAN", "SGFCF+DAN", "UnifiedNorm-SGFCF+DAN"):
+        config = best_configs[model_name]
         params = config["params"]
-        normalization = config.get("normalization")
-        if model_name == "three_component":
-            spectrum = "three_bands"
-        elif model_name == "two_component":
-            spectrum = "two_bands"
-        elif model_name == "original":
-            spectrum = "largest_edge"
+        Recmodel.k = int(params.get("k", input_k))
+        if model_name == "DAN":
+            dan_model = tmp.DANScoringModel(Recmodel.R, **config["dan_params"])
+            test_results[model_name] = tmp._evaluate_dan(dan_model, Recmodel, dataset)
         else:
-            spectrum = "largest"
-        if normalization is None:
-            component_key = (
-                "symmetric",
-                spectrum,
-                params["alpha"],
-                params["eps"],
-                Recmodel.k,
-            )
-        else:
-            component_key = (
-                "generalized",
-                normalization["alpha_1"],
-                normalization["eps_1"],
-                normalization["alpha_2"],
-                normalization["eps_2"],
-                Recmodel.k,
-            )
-        if component_key not in component_cache:
-            three_component_key = (
-                "symmetric", "three_bands",
-                params["alpha"], params["eps"], Recmodel.k,
-            )
-            can_reuse_three_bands = (
-                spectrum == "two_bands"
-                and three_component_key in component_cache
-                and 3 * int(Recmodel.k) <= min(Recmodel.R.shape)
-            )
-            if can_reuse_three_bands:
-                component_cache[component_key] = tmp.select_spectral_bands(
-                    component_cache[three_component_key],
-                    (tmp.BAND_LOW, tmp.BAND_HIGH),
+            components = tmp.compute_components(Recmodel, params, spectrum="largest")
+            if model_name == "SGFCF":
+                test_results[model_name] = tmp.evaluate(
+                    tmp.SGFCFModel(Recmodel, params), dataset, components, shared_homophily
                 )
             else:
-                component_cache[component_key] = tmp.compute_components(
-                    Recmodel,
-                    params,
-                    normalization=normalization,
-                    spectrum=spectrum,
+                unified = model_name.startswith("UnifiedNorm")
+                dan_input = components[3] if unified else Recmodel.R
+                dan_model = tmp.DANScoringModel(dan_input, **config["dan_params"])
+                combined = tmp.SGFCFPlusDANModel(
+                    Recmodel, params, dan_model, config["dan_coefficient"], dan_interactions=dan_input
                 )
-
-        if model_name == "three_component":
-            sgfcf_model = tmp.SGFCFModel(
-                Recmodel,
-                params,
-                mid_coefficient=config["mid_coefficient"],
-                high_coefficient=config["high_coefficient"],
-                spectrum="three_bands",
-            )
-        elif model_name == "two_component":
-            sgfcf_model = tmp.TwoComponentSGFCFModel(
-                Recmodel,
-                params,
-                low_coefficient=config["low_coefficient"],
-                high_coefficient=config["high_coefficient"],
-            )
-        else:
-            sgfcf_model = tmp.SGFCFModel(Recmodel, params)
-        test_results[model_name] = tmp.evaluate(
-            sgfcf_model,
-            dataset,
-            components=component_cache[component_key],
-            homophily=test_homophily,
-        )
+                test_results[model_name] = tmp.evaluate_sgfcf_dan(
+                    combined, dataset, components, shared_homophily
+                )
         world.cprint(f"{model_name} best parameters: {config}")
         world.cprint(f"{model_name} test: {test_results[model_name]}")
+        print()
+
+
 finally:
     if world.tensorboard:
         w.close()

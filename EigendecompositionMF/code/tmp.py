@@ -2,6 +2,8 @@
 
 from collections import OrderedDict
 import os
+import gc
+from itertools import product
 
 import numpy as np
 import scipy.sparse as sp
@@ -45,6 +47,39 @@ SGFCF_SEARCH_SPACE = (
     {"beta_1": 0.3, "beta_2": 2.5, "alpha": 0.0, "eps": 0.34, "gamma": 1.6},
     {"beta_1": 2.5, "beta_2": 6.5, "alpha": 4.8, "eps": 0.5, "gamma": 0.025},
 )
+
+DAN_DEFAULT_PARAMS = {"reg_p": 20.0, "alpha": 0.2, "beta": 0.3, "drop_p": 0.6, "xi": 0.1}
+DAN_DATASET_PARAMS = {
+    "amazon-electronics": {"reg_p": 50.0, "alpha": 0.2, "beta": 0.3, "drop_p": 0.6},
+    "lastfm": {"reg_p": 50.0, "alpha": 0.3, "beta": 0.3, "drop_p": 0.7},
+    "citeulike": {"reg_p": 10.0, "alpha": 0.2, "beta": 0.2, "drop_p": 0.6},
+    "epinions": {"reg_p": 50.0, "alpha": 0.2, "beta": 0.3, "drop_p": 0.7},
+    "yelp": {"reg_p": 50.0, "alpha": 0.3, "beta": 0.2, "drop_p": 0.7},
+    "douban-book": {"reg_p": 10.0, "alpha": 0.2, "beta": 0.2, "drop_p": 0.4},
+    "amazon-CD": {"reg_p": 50.0, "alpha": 0.2, "beta": 0.3, "drop_p": 0.7},
+    "news": {"reg_p": 50.0, "alpha": 0.2, "beta": 0.2, "drop_p": 0.4},
+    "movielens": {"reg_p": 20.0, "alpha": 0.2, "beta": 0.2, "drop_p": 0.4},
+    "gowalla": {"reg_p": 20.0, "alpha": 0.2, "beta": 0.3, "drop_p": 0.6},
+    "yelp2018": {"reg_p": 50.0, "alpha": 0.3, "beta": 0.3, "drop_p": 0.7},
+}
+
+# Explicit search spaces used by the four-model pipeline.
+SGFCF_SEARCH_SPACE = tuple(
+    {"beta_1": b1, "beta_2": b2, "alpha": a, "eps": e, "gamma": g}
+    for b1, b2, a, e, g in product(
+        (0.8, 1.0), (1.1, 1.3), (0.0, 1.0, 20.0),
+        (0.1, 0.3, 0.5), (0.1, 0.3, 0.5)
+    )
+)
+DAN_SEARCH_SPACE = tuple(
+    {"model": "RLAE_DAN", "reg_p": 50.0, "alpha": a,
+     "beta": b, "drop_p": d, "xi": x}
+    for a, b, d, x in product(
+        (0.1, 0.3, 0.5), (0.1, 0.3, 0.5),
+        (0.2, 0.6), (0.1, 0.3, 0.5)
+    )
+)
+DAN_COEFFICIENT_VALUES = (0.1, 0.5, 1.0)
 
 SGFCF_DEFAULTS = {
     "amazon-electronics": {"beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
@@ -847,6 +882,122 @@ def _score(results):
     return float(results["recall"][0])
 
 
+# ---------------------------------------------------------------------------
+# DAN references and the two SGFCF+DAN combinations
+# ---------------------------------------------------------------------------
+class DANScoringModel:
+    """Repository DAN (primal closed-form implementation)."""
+
+    def __init__(self, interactions, model="RLAE_DAN", reg_p=20.0,
+                 alpha=0.2, beta=0.3, drop_p=0.6, xi=0.1):
+        if model not in {"LAE_DAN", "EASE_DAN", "RLAE_DAN"}:
+            raise ValueError(f"Unknown DAN model: {model}")
+        self.model = model
+        self.interactions = interactions.astype(np.float64).tocsr()
+        counts_i = np.asarray(self.interactions.sum(axis=0)).ravel()
+        counts_u = np.asarray(self.interactions.sum(axis=1)).ravel()
+        safe_u = np.maximum(counts_u, 1.0)
+        regularization = float(reg_p) + float(drop_p) / (1.0 - float(drop_p)) * counts_i
+        gram = self.interactions.multiply(np.power(safe_u, -float(beta))[:, None]).T.dot(self.interactions).toarray()
+        diagonal = np.diag_indices(gram.shape[0])
+        gram[diagonal] += regularization
+        precision = np.linalg.inv(gram)
+        diag_precision = np.diag(precision)
+        if model == "EASE_DAN":
+            base = np.eye(len(diag_precision)) - precision / diag_precision
+        elif model == "LAE_DAN":
+            base = np.eye(len(diag_precision)) - precision * regularization
+        else:
+            condition = (1.0 - regularization * diag_precision) > float(xi)
+            lagrangian = ((1.0 - float(xi)) / diag_precision - regularization) * condition
+            base = np.eye(len(diag_precision)) - precision * (regularization + lagrangian)
+        self.weights = base * np.power(np.maximum(counts_i, 1.0), float(alpha)).reshape(-1, 1)
+        self.weights *= np.power(np.maximum(counts_i, 1.0), -float(alpha))
+        self.weights[diagonal] = 0.0
+        self.cold_items = counts_i == 0
+        self.params = {"model": model, "reg_p": float(reg_p), "alpha": float(alpha),
+                       "beta": float(beta), "drop_p": float(drop_p), "xi": float(xi)}
+
+    def score_batch(self, interactions):
+        scores = np.asarray(interactions.dot(self.weights))
+        scores[:, self.cold_items] = -np.inf
+        return scores
+
+
+class SGFCFPlusDANModel(SGFCFModel):
+    """Linear score combination of SGFCF and DAN."""
+
+    def __init__(self, base_model, params, dan_model, dan_coefficient,
+                 dan_interactions=None):
+        super().__init__(base_model, params)
+        self.dan_model = dan_model
+        self.dan_coefficient = float(dan_coefficient)
+        self.dan_interactions = base_model.R if dan_interactions is None else dan_interactions
+
+
+class UnifiedNormalizationSGFCFDANModel(SGFCFPlusDANModel):
+    """SGFCF+DAN where DAN is fitted to SGFCF's normalized interaction matrix."""
+
+
+def _evaluate_dan(model, base_model, dataset, batch_size=500):
+    users = list(dataset.testDict.keys())
+    results = _empty_results()
+    if not users:
+        return results
+    max_k = min(max(world.topks), base_model.m_items)
+    for start in range(0, len(users), batch_size):
+        batch_users = users[start:start + batch_size]
+        scores = torch.as_tensor(model.score_batch(base_model.R[batch_users]), device=base_model.device)
+        positive = dataset.getUserPosItems(batch_users)
+        rows, cols = [], []
+        for row, items in enumerate(positive):
+            rows.extend([row] * len(items)); cols.extend(items)
+        if rows:
+            scores[rows, cols] = -(1 << 10)
+        top_items = torch.topk(scores, k=max_k).indices.cpu()
+        batch_result = base_model.test_one_batch((top_items, [dataset.testDict[u] for u in batch_users]))
+        for metric in results:
+            results[metric] += batch_result[metric]
+    for metric in results:
+        results[metric] /= float(len(users))
+    return results
+
+
+def evaluate_sgfcf_dan(model, dataset, components, homophily, batch_size=500):
+    user_factors, item_factors = model.factors(components, homophily)
+    normalized = components[3]
+    normalized_csc = normalized.tocsc()
+    users = list(dataset.testDict.keys())
+    results = _empty_results()
+    if not users:
+        return results
+    max_k = min(max(world.topks), model.base_model.m_items)
+    for start in range(0, len(users), batch_size):
+        batch_users = users[start:start + batch_size]
+        indices = torch.as_tensor(batch_users, dtype=torch.long, device=model.base_model.device)
+        spectral = user_factors[indices] @ item_factors.t()
+        total = spectral.sum(dim=1, keepdim=True); total[total == 0] = 1.0
+        spectral = spectral / total
+        convolution = normalized[batch_users].dot(normalized_csc.T).dot(normalized).toarray()
+        total = convolution.sum(axis=1, keepdims=True); total[total == 0] = 1.0
+        convolution = torch.as_tensor(convolution / total, dtype=torch.float32, device=model.base_model.device)
+        dan_scores = torch.as_tensor(model.dan_model.score_batch(model.dan_interactions[batch_users]), dtype=torch.float32, device=model.base_model.device)
+        scores = torch.sigmoid(spectral + model.params["gamma"] * convolution + model.dan_coefficient * dan_scores)
+        positive = dataset.getUserPosItems(batch_users)
+        rows, cols = [], []
+        for row, items in enumerate(positive):
+            rows.extend([row] * len(items)); cols.extend(items)
+        if rows:
+            scores[rows, cols] = -(1 << 10)
+        top_items = torch.topk(scores, k=max_k).indices.cpu()
+        batch_result = model.base_model.test_one_batch((top_items, [dataset.testDict[u] for u in batch_users]))
+        for metric in results:
+            results[metric] += batch_result[metric]
+    for metric in results:
+        results[metric] /= float(len(users))
+    return results
+
+
 def search(base_model, dataset, coefficient_values=COEFFICIENT_VALUES,
            homophily=None):
     """Select all SGFCF variants using recall on the requested split."""
@@ -991,3 +1142,254 @@ def search(base_model, dataset, coefficient_values=COEFFICIENT_VALUES,
         generalized_normalization=best_generalized_results,
     )
     return configs, validation_results
+
+
+def search(base_model, dataset, homophily=None, k_values=None,
+           dan_params=None):
+    """Search exactly four models: SGFCF, DAN, linear, and unified-normalized."""
+    if homophily is None:
+        homophily = compute_homophily(base_model)
+    dan_params = {**DAN_DEFAULT_PARAMS, **(dan_params or {}), "model": "RLAE_DAN"}
+    if k_values is None:
+        k_values = [base_model.k]
+    original_k = base_model.k
+    candidates = []
+    for k in k_values:
+        for candidate in SGFCF_SEARCH_SPACE:
+            params = dict(candidate); params["k"] = int(k)
+            candidates.append(params)
+
+    configs, results = OrderedDict(), OrderedDict()
+    best = {name: (-np.inf, None, None) for name in ("SGFCF", "DAN", "SGFCF+DAN", "UnifiedNorm-SGFCF+DAN")}
+    dan_model = None
+    try:
+        for index, params in enumerate(candidates, 1):
+            base_model.k = int(params["k"])
+            components = compute_components(base_model, params, spectrum="largest")
+            sgfcf = SGFCFModel(base_model, params)
+            sgfcf_result = evaluate(sgfcf, dataset, components, homophily)
+            score = _score(sgfcf_result)
+            if score > best["SGFCF"][0]:
+                best["SGFCF"] = (score, {"params": dict(params)}, sgfcf_result)
+
+            if dan_model is None:
+                dan_model = DANScoringModel(base_model.R, **dan_params)
+                dan_result = _evaluate_dan(dan_model, base_model, dataset)
+                best["DAN"] = (_score(dan_result), {
+                    "params": dict(params), "dan_params": dict(dan_params)
+                }, dan_result)
+
+            for name, unified in (("SGFCF+DAN", False), ("UnifiedNorm-SGFCF+DAN", True)):
+                dan_input = components[3] if unified else base_model.R
+                candidate_dan = DANScoringModel(dan_input, **dan_params) if unified else dan_model
+                for dan_coefficient in COEFFICIENT_VALUES:
+                    combined = SGFCFPlusDANModel(
+                        base_model, params, candidate_dan, dan_coefficient,
+                        dan_interactions=dan_input,
+                    )
+                    combined.params["gamma"] = params["gamma"]
+                    combined_result = evaluate_sgfcf_dan(combined, dataset, components, homophily)
+                    score = _score(combined_result)
+                    if score > best[name][0]:
+                        best[name] = (score, {
+                            "params": dict(params),
+                            "dan_coefficient": dan_coefficient,
+                            "dan_params": dict(dan_params),
+                            "unified_normalization": unified,
+                        }, combined_result)
+            print(f"Four-model search {index}/{len(candidates)}: "
+                  f"SGFCF={best['SGFCF'][0]:.6f}, "
+                  f"DAN={best['DAN'][0]:.6f}, "
+                  f"linear={best['SGFCF+DAN'][0]:.6f}, "
+                  f"unified={best['UnifiedNorm-SGFCF+DAN'][0]:.6f}", flush=True)
+        for name in ("SGFCF", "DAN", "SGFCF+DAN", "UnifiedNorm-SGFCF+DAN"):
+            configs[name], results[name] = best[name][1], best[name][2]
+    finally:
+        base_model.k = original_k
+    return configs, results
+
+
+def search(base_model, dataset, homophily=None, k_values=None,
+           dan_params=None):
+    """Search SGFCF, DAN, linear SGFCF+DAN, and unified SGFCF+DAN."""
+    if homophily is None:
+        homophily = compute_homophily(base_model)
+    k_values = tuple(k_values or (64, 128, 256))
+    candidates = [dict(p, k=int(k)) for k in k_values for p in SGFCF_SEARCH_SPACE]
+    names = ("SGFCF", "DAN", "SGFCF+DAN", "UnifiedNorm-SGFCF+DAN")
+    best = {name: (-np.inf, None, None) for name in names}
+    component_cache = {}
+    dan_cache = {}
+    original_k = base_model.k
+
+    def dan_for(params):
+        key = tuple(sorted(params.items()))
+        if key not in dan_cache:
+            dan_cache[key] = DANScoringModel(base_model.R, **params)
+        return dan_cache[key]
+
+    try:
+        # Standalone DAN search over its requested 54 configurations.
+        for dan_index, dan_config in enumerate(DAN_SEARCH_SPACE, 1):
+            dan_model = dan_for(dan_config)
+            dan_result = _evaluate_dan(dan_model, base_model, dataset)
+            score = _score(dan_result)
+            if score > best["DAN"][0]:
+                best["DAN"] = (score, {"params": dict(candidates[0]),
+                                       "dan_params": dict(dan_config)}, dan_result)
+            if dan_index % 9 == 0:
+                print(f"DAN search {dan_index}/{len(DAN_SEARCH_SPACE)}: best={best['DAN'][0]:.6f}", flush=True)
+
+        for index, params in enumerate(candidates, 1):
+            base_model.k = int(params["k"])
+            key = (params["alpha"], params["eps"], params["k"])
+            if key not in component_cache:
+                component_cache[key] = compute_components(base_model, params, spectrum="largest")
+            components = component_cache[key]
+            sgfcf_result = evaluate(SGFCFModel(base_model, params), dataset, components, homophily)
+            if _score(sgfcf_result) > best["SGFCF"][0]:
+                best["SGFCF"] = (_score(sgfcf_result), {"params": dict(params)}, sgfcf_result)
+
+            for dan_config in DAN_SEARCH_SPACE:
+                dan_model = dan_for(dan_config)
+                for coefficient in DAN_COEFFICIENT_VALUES:
+                    linear = SGFCFPlusDANModel(base_model, params, dan_model, coefficient)
+                    result = evaluate_sgfcf_dan(linear, dataset, components, homophily)
+                    if _score(result) > best["SGFCF+DAN"][0]:
+                        best["SGFCF+DAN"] = (_score(result), {
+                            "params": dict(params), "dan_params": dict(dan_config),
+                            "dan_coefficient": coefficient}, result)
+
+                normalized = components[3]
+                unified_dan = DANScoringModel(normalized, **dan_config)
+                for coefficient in DAN_COEFFICIENT_VALUES:
+                    unified = UnifiedNormalizationSGFCFDANModel(
+                        base_model, params, unified_dan, coefficient,
+                        dan_interactions=normalized
+                    )
+                    result = evaluate_sgfcf_dan(unified, dataset, components, homophily)
+                    if _score(result) > best["UnifiedNorm-SGFCF+DAN"][0]:
+                        best["UnifiedNorm-SGFCF+DAN"] = (_score(result), {
+                            "params": dict(params), "dan_params": dict(dan_config),
+                            "dan_coefficient": coefficient}, result)
+            print(f"Four-model search {index}/{len(candidates)}: "
+                  f"SGFCF={best['SGFCF'][0]:.6f}, DAN={best['DAN'][0]:.6f}, "
+                  f"linear={best['SGFCF+DAN'][0]:.6f}, "
+                  f"unified={best['UnifiedNorm-SGFCF+DAN'][0]:.6f}", flush=True)
+    finally:
+        base_model.k = original_k
+    configs = OrderedDict((name, best[name][1]) for name in names)
+    validation = OrderedDict((name, best[name][2]) for name in names)
+    return configs, validation
+
+
+def search(base_model, dataset, homophily=None, k_values=None,
+           dan_params=None):
+    """Full SGFCF/DAN searches followed by top-10 hybrid searches."""
+    if homophily is None:
+        homophily = compute_homophily(base_model)
+    k_values = tuple(k_values or (64, 128, 256))
+    sgfcf_candidates = [dict(p, k=int(k)) for k in k_values for p in SGFCF_SEARCH_SPACE]
+    component_cache = {}
+    original_k = base_model.k
+
+    sgfcf_ranked, dan_ranked = [], []
+    try:
+        # Full SGFCF search.
+        for index, params in enumerate(sgfcf_candidates, 1):
+            base_model.k = int(params["k"])
+            key = (params["alpha"], params["eps"], params["k"])
+            if key not in component_cache:
+                component_cache[key] = compute_components(base_model, params, spectrum="largest")
+            result = evaluate(SGFCFModel(base_model, params), dataset,
+                              component_cache[key], homophily)
+            sgfcf_ranked.append((_score(result), dict(params), result))
+            if index % 20 == 0 or index == len(sgfcf_candidates):
+                print(f"SGFCF search {index}/{len(sgfcf_candidates)}: "
+                      f"best={max(x[0] for x in sgfcf_ranked):.6f}", flush=True)
+
+        # Full DAN search.
+        for index, dan_config in enumerate(DAN_SEARCH_SPACE, 1):
+            dan_model = DANScoringModel(base_model.R, **dan_config)
+            result = _evaluate_dan(dan_model, base_model, dataset)
+            dan_ranked.append((_score(result), dict(dan_config), result))
+            del dan_model
+            gc.collect()
+            if index % 9 == 0 or index == len(DAN_SEARCH_SPACE):
+                print(f"DAN search {index}/{len(DAN_SEARCH_SPACE)}: "
+                      f"best={max(x[0] for x in dan_ranked):.6f}", flush=True)
+
+        top_sgfcf = sorted(sgfcf_ranked, key=lambda x: x[0], reverse=True)[:10]
+        top_dan = sorted(dan_ranked, key=lambda x: x[0], reverse=True)[:10]
+        hybrid_best = {
+            "SGFCF+DAN": (-np.inf, None, None),
+            "UnifiedNorm-SGFCF+DAN": (-np.inf, None, None),
+        }
+        total_hybrid = len(top_sgfcf) * len(top_dan) * len(DAN_COEFFICIENT_VALUES)
+        hybrid_index = 0
+        # Process one DAN configuration at a time so that at most one dense
+        # DAN matrix is resident for each normalization type.
+        for _, dan_config, _ in top_dan:
+            raw_dan = DANScoringModel(base_model.R, **dan_config)
+            for _, params, _ in top_sgfcf:
+                base_model.k = int(params["k"])
+                key = (params["alpha"], params["eps"], params["k"])
+                components = component_cache[key]
+                for coefficient in DAN_COEFFICIENT_VALUES:
+                    hybrid = SGFCFPlusDANModel(
+                        base_model, params, raw_dan, coefficient,
+                        dan_interactions=base_model.R,
+                    )
+                    result = evaluate_sgfcf_dan(hybrid, dataset, components, homophily)
+                    score = _score(result)
+                    if score > hybrid_best["SGFCF+DAN"][0]:
+                        hybrid_best["SGFCF+DAN"] = (score, {
+                            "params": dict(params), "dan_params": dict(dan_config),
+                            "dan_coefficient": coefficient}, result)
+                    hybrid_index += 1
+                    if hybrid_index % 100 == 0:
+                        print(f"Hybrid search {hybrid_index}/{total_hybrid * 2}", flush=True)
+            del raw_dan
+            gc.collect()
+            # Run the unified-normalization half after releasing the raw DAN
+            # matrix; Yelp2018 cannot safely hold both dense weight matrices.
+            for _, params, _ in top_sgfcf:
+                base_model.k = int(params["k"])
+                key = (params["alpha"], params["eps"], params["k"])
+                components = component_cache[key]
+                normalized = components[3]
+                unified_dan = DANScoringModel(normalized, **dan_config)
+                for coefficient in DAN_COEFFICIENT_VALUES:
+                    hybrid = UnifiedNormalizationSGFCFDANModel(
+                        base_model, params, unified_dan, coefficient,
+                        dan_interactions=normalized,
+                    )
+                    result = evaluate_sgfcf_dan(hybrid, dataset, components, homophily)
+                    score = _score(result)
+                    if score > hybrid_best["UnifiedNorm-SGFCF+DAN"][0]:
+                        hybrid_best["UnifiedNorm-SGFCF+DAN"] = (score, {
+                            "params": dict(params), "dan_params": dict(dan_config),
+                            "dan_coefficient": coefficient}, result)
+                    hybrid_index += 1
+                    if hybrid_index % 100 == 0 or hybrid_index == total_hybrid * 2:
+                        print(f"Hybrid search {hybrid_index}/{total_hybrid * 2}", flush=True)
+                del unified_dan
+                gc.collect()
+
+        best_sgfcf = max(sgfcf_ranked, key=lambda x: x[0])
+        best_dan = max(dan_ranked, key=lambda x: x[0])
+        configs = OrderedDict([
+            ("SGFCF", {"params": best_sgfcf[1]}),
+            ("DAN", {"params": dict(sgfcf_candidates[0]), "dan_params": best_dan[1]}),
+            ("SGFCF+DAN", hybrid_best["SGFCF+DAN"][1]),
+            ("UnifiedNorm-SGFCF+DAN", hybrid_best["UnifiedNorm-SGFCF+DAN"][1]),
+        ])
+        validation = OrderedDict([
+            ("SGFCF", best_sgfcf[2]),
+            ("DAN", best_dan[2]),
+            ("SGFCF+DAN", hybrid_best["SGFCF+DAN"][2]),
+            ("UnifiedNorm-SGFCF+DAN", hybrid_best["UnifiedNorm-SGFCF+DAN"][2]),
+        ])
+        return configs, validation
+    finally:
+        base_model.k = original_k
