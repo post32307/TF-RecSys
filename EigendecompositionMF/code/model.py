@@ -14,32 +14,10 @@ import multiprocessing
 import torch.nn as nn
 
 
-def _threshold_offdiag_graph(matrix):
-    graph = matrix.tocsr(copy=True)
-    graph.setdiag(0)
-    graph.eliminate_zeros()
-    graph.data[graph.data <= 1] = 0
-    graph.eliminate_zeros()
-    graph.data = np.ones(graph.nnz, dtype=np.int8)
-    return graph
-
-
-def _induced_edges(graph, nodes, marker, stamp):
-    if len(nodes) <= 1:
-        return 0, stamp
-    stamp += 1
-    if stamp == np.iinfo(marker.dtype).max:
-        marker.fill(0)
-        stamp = 1
-    marker[nodes] = stamp
-    count = 0
-    for node in nodes:
-        neighbors = graph.indices[graph.indptr[node]:graph.indptr[node + 1]]
-        count += np.count_nonzero(marker[neighbors] == stamp)
-    return count, stamp
 
 
 class TFmodel:
+
     def __init__(self, config: dict, dataset: BasicDataset):
         self.config = config
         self.dataset = dataset
@@ -55,23 +33,46 @@ class TFmodel:
         rowsum[rowsum == 0] = 1e-9
         self.D = sp.diags(rowsum) #CSR
         self.D_inv = sp.diags(1. / rowsum) #CSR
-
     
 
+
     # Model Functions
+
+    def _threshold_offdiag_graph(self, matrix):
+        graph = matrix.tocsr(copy=True)
+        graph.setdiag(0)
+        graph.eliminate_zeros()
+        graph.data[graph.data <= 1] = 0
+        graph.eliminate_zeros()
+        graph.data = np.ones(graph.nnz, dtype=np.int8)
+        return graph
+
+    def _induced_edges(self, graph, nodes, marker, stamp):
+        if len(nodes) <= 1:
+            return 0, stamp
+        stamp += 1
+        if stamp == np.iinfo(marker.dtype).max:
+            marker.fill(0)
+            stamp = 1
+        marker[nodes] = stamp
+        count = 0
+        for node in nodes:
+            neighbors = graph.indices[graph.indptr[node]:graph.indptr[node + 1]]
+            count += np.count_nonzero(marker[neighbors] == stamp)
+        return count, stamp
 
     def compute_homophily(self):
         """Compute SGFCF user/item homophily ratios."""
         R = self.R.astype(np.float32).tocsr()
         R_csc = R.tocsc()
-        item_graph = _threshold_offdiag_graph(R.T.dot(R))
-        user_graph = _threshold_offdiag_graph(R.dot(R.T))
+        item_graph = self._threshold_offdiag_graph(R.T.dot(R))
+        user_graph = self._threshold_offdiag_graph(R.dot(R.T))
         user_ratio = np.zeros(R.shape[0], dtype=np.float32)
         marker = np.zeros(R.shape[1], dtype=np.int32)
         stamp = 0
         for user in range(R.shape[0]):
             nodes = R[user].indices
-            edges, stamp = _induced_edges(item_graph, nodes, marker, stamp)
+            edges, stamp = self._induced_edges(item_graph, nodes, marker, stamp)
             if len(nodes) > 1:
                 user_ratio[user] = edges / (len(nodes) * (len(nodes) - 1))
         item_ratio = np.zeros(R.shape[1], dtype=np.float32)
@@ -79,7 +80,7 @@ class TFmodel:
         stamp = 0
         for item in range(R.shape[1]):
             nodes = R_csc[:, item].indices
-            edges, stamp = _induced_edges(user_graph, nodes, marker, stamp)
+            edges, stamp = self._induced_edges(user_graph, nodes, marker, stamp)
             if len(nodes) > 1:
                 item_ratio[item] = edges / (len(nodes) * (len(nodes) - 1))
         return (torch.as_tensor(user_ratio, dtype=torch.float32, device=self.device),
@@ -98,12 +99,35 @@ class TFmodel:
                         / (maximum - minimum))
         return value.unsqueeze(0).pow(exponent.unsqueeze(1))
 
-    def fit_dan(self, model="RLAE_DAN", reg_p=20.0, alpha=0.2,
-                beta=0.3, drop_p=0.6, xi=0.1):
-        """Fit the standalone DAN primal solution on this model's R."""
+    def fit_dan(self, interactions=None, model="RLAE_DAN", reg_p=20.0,
+                alpha=0.0, beta=0.0, drop_p=0.6, xi=0.1,
+                alpha_i=None, lambda_i=None,
+                alpha_u=None, lambda_u=None):
+        """Fit DAN using the SGFCF-style user/item normalization.
+
+        When all four normalization arguments are supplied, the input is
+        transformed as ``D_U @ R @ D_I`` where
+        ``D_U=(d_U+lambda_u)^(-alpha_u)`` and
+        ``D_I=(d_I+lambda_i)^(-alpha_i)``.  Leaving them unset preserves the
+        previous behavior and fits DAN on the supplied interaction matrix.
+        """
         if model not in {"LAE_DAN", "EASE_DAN", "RLAE_DAN"}:
             raise ValueError(f"Unknown DAN model: {model}")
-        X = self.R.astype(np.float64).tocsr()
+        X = (self.R if interactions is None else interactions).astype(np.float64).tocsr()
+        if all(value is not None for value in
+               (alpha_i, lambda_i, alpha_u, lambda_u)):
+            user_degree = np.asarray(X.sum(axis=1)).ravel()
+            item_degree = np.asarray(X.sum(axis=0)).ravel()
+            with np.errstate(divide="ignore", invalid="ignore"):
+                user_scale = np.power(
+                    user_degree + float(lambda_u), -float(alpha_u)
+                )
+                item_scale = np.power(
+                    item_degree + float(lambda_i), -float(alpha_i)
+                )
+            user_scale[~np.isfinite(user_scale)] = 0.0
+            item_scale[~np.isfinite(item_scale)] = 0.0
+            X = sp.diags(user_scale).dot(X).dot(sp.diags(item_scale)).tocsr()
         item_counts = np.asarray(X.sum(axis=0)).ravel()
         user_counts = np.asarray(X.sum(axis=1)).ravel()
         safe_users = np.maximum(user_counts, 1.0)
@@ -131,6 +155,100 @@ class TFmodel:
                            "beta": float(beta), "drop_p": float(drop_p), "xi": float(xi)}}
 
 
+
+    def build_combined_X(self, beta_1=1.0, beta_2=1.0, gamma=1.0,
+                         dan_coefficient=1.0, dan_params=None,
+                         alpha_i=0.2, lambda_i=1.0,
+                         alpha_u=0.2, lambda_u=1.0):
+        """Build a dense user-item score matrix for SGFCF+DAN testing.
+
+        The SGFCF graph-filter scores and DAN autoencoder scores are computed
+        with this class's component methods, normalized row-wise, combined,
+        and passed through a sigmoid.  The returned ``X`` has shape
+        ``(n_users, m_items)`` and can be used directly with
+        :meth:`Test_RatingMatrix`.
+        """
+        # SGFCF graph filtering on the normalized bipartite adjacency.
+        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
+        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            user_scale = np.power(user_degree + float(lambda_u), -float(alpha_u))
+            item_scale = np.power(item_degree + float(lambda_i), -float(alpha_i))
+        user_scale[~np.isfinite(user_scale)] = 0.0
+        item_scale[~np.isfinite(item_scale)] = 0.0
+        normalized_interaction = sp.diags(user_scale).dot(
+            self.R
+        ).dot(sp.diags(item_scale)).tocsr()
+        normalized_adj = sp.bmat([
+            [None, normalized_interaction],
+            [normalized_interaction.T, None],
+        ], format="csr")
+        eigenvectors, eigenvalues = self.Eigendecomposition(normalized_adj)
+        user_homophily, item_homophily = self.compute_homophily()
+        homophily = torch.cat((user_homophily, item_homophily))
+        response = self.individual_weight(
+            torch.clamp(torch.abs(eigenvalues), min=1e-12),
+            homophily,
+            beta_1=beta_1,
+            beta_2=beta_2,
+        )
+        filtered = eigenvectors * response
+        graph_scores = filtered[:self.n_users] @ filtered[self.n_users:].t()
+        graph_sum = graph_scores.sum(dim=1, keepdim=True)
+        graph_sum[graph_sum == 0] = 1.0
+        graph_scores = graph_scores / graph_sum
+        # The convolution term is controlled by ``gamma``.  Avoid building
+        # the large dense user-item convolution when its coefficient is zero.
+        gamma_value = float(gamma)
+        convolution = None
+        if gamma_value != 0.0:
+            normalized_interactions = normalized_adj[:self.n_users, self.n_users:]
+            convolution = normalized_interactions.dot(
+                normalized_interactions.T
+            ).dot(normalized_interactions).toarray()
+            convolution = torch.as_tensor(convolution, dtype=torch.float32,
+                                           device=self.device)
+            convolution_sum = convolution.sum(dim=1, keepdim=True)
+            convolution_sum[convolution_sum == 0] = 1.0
+            convolution = convolution / convolution_sum
+
+        # DAN autoencoder scores from the same training interaction matrix.
+        dan_options = dict(dan_params or {})
+        dan_options.pop("alpha", None)
+        dan_options.pop("beta", None)
+        dan_state = self.fit_dan(
+            interactions=self.R,
+            alpha=0.0,
+            beta=0.0,
+            alpha_i=alpha_i,
+            lambda_i=lambda_i,
+            alpha_u=alpha_u,
+            lambda_u=lambda_u,
+            **dan_options,
+        )
+        # Score DAN with the same normalized interaction matrix used to fit
+        # the model, rather than reverting to the raw interaction matrix.
+        dan_scores = np.asarray(
+            normalized_interaction.dot(dan_state["weights"]), dtype=np.float32
+        )
+        dan_scores[:, dan_state["cold_items"]] = -np.inf
+        dan_scores = torch.as_tensor(dan_scores, dtype=torch.float32,
+                                     device=self.device)
+        finite_dan = torch.isfinite(dan_scores)
+        dan_for_sum = torch.where(finite_dan, dan_scores, torch.zeros_like(dan_scores))
+        dan_sum = dan_for_sum.sum(dim=1, keepdim=True)
+        dan_sum[dan_sum == 0] = 1.0
+        dan_for_sum = dan_for_sum / dan_sum
+
+        if convolution is None:
+            X = torch.sigmoid(graph_scores
+                              + float(dan_coefficient) * dan_for_sum)
+        else:
+            X = torch.sigmoid(graph_scores + gamma_value * convolution
+                              + float(dan_coefficient) * dan_for_sum)
+        cold_items = np.asarray(self.R.sum(axis=0)).ravel() == 0
+        X[:, torch.as_tensor(cold_items, device=self.device)] = -(1 << 10)
+        return X
 
 
 
