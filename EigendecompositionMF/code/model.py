@@ -38,6 +38,107 @@ class TFmodel:
 
     # Model Functions
 
+    def S_SGFCF(self, beta_1=1.0, beta_2=1.0, alpha=0.0,
+                eps=0.5, gamma=1.0, k=None, cache=None):
+        """Return the SGFCF user-item scoring matrix."""
+        if k is not None:
+            self.k = int(k)
+        degrees_u = np.asarray(self.R.sum(axis=1)).ravel()
+        degrees_i = np.asarray(self.R.sum(axis=0)).ravel()
+        # Zero-degree users/items can occur after the train/validation split.
+        # In particular, alpha=0 with eps>0 would otherwise evaluate
+        # 0**(-eps) and inject inf values into the normalized matrix.
+        with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+            user_scale = np.power(degrees_u + float(alpha), -float(eps))
+            item_scale = np.power(degrees_i + float(alpha), -float(eps))
+        user_scale[~np.isfinite(user_scale)] = 0.0
+        item_scale[~np.isfinite(item_scale)] = 0.0
+        norm_cache = None if cache is None else cache.setdefault("normalized", {})
+        # Validation and test loaders may infer slightly different dimensions
+        # when an ID appears only in one split.  Namespace cache entries by
+        # model instance so matrices with different shapes are never reused.
+        model_key = id(self)
+        norm_key = (model_key, float(alpha), float(eps))
+        if norm_cache is not None and norm_key in norm_cache:
+            normalized, adjacency = norm_cache[norm_key]
+        else:
+            normalized = sp.diags(user_scale).dot(self.R).dot(sp.diags(item_scale)).tocsr()
+            adjacency = sp.bmat([[None, normalized], [normalized.T, None]], format="csr")
+            if norm_cache is not None:
+                limit = int(cache.get("max_normalized_entries", 1))
+                while len(norm_cache) >= limit:
+                    norm_cache.pop(next(iter(norm_cache)))
+                norm_cache[norm_key] = (normalized, adjacency)
+        eigen_cache = None if cache is None else cache.setdefault("eigen", {})
+        key = (model_key, int(self.k), float(alpha), float(eps))
+        if eigen_cache is not None and key in eigen_cache:
+            vectors, values = eigen_cache[key]
+        else:
+            vectors, values = self.Eigendecomposition(adjacency)
+            if eigen_cache is not None:
+                limit = int(cache.get("max_eigen_entries", 1))
+                while len(eigen_cache) >= limit:
+                    eigen_cache.pop(next(iter(eigen_cache)))
+                eigen_cache[key] = (vectors, values)
+        hu, hi = self.compute_homophily()
+        response = self.individual_weight(torch.abs(values).clamp_min(1e-12),
+                                           torch.cat((hu, hi)), beta_1, beta_2)
+        weighted = vectors * response
+        scores = weighted[:self.n_users] @ weighted[self.n_users:].t()
+        # The eigenspace may remain in the cache, but these intermediate GPU
+        # tensors are no longer needed after the graph score is formed.
+        del weighted, response
+        denominator = scores.sum(dim=1, keepdim=True)
+        denominator[denominator == 0] = 1.0
+        scores = scores / denominator
+        if float(gamma) != 0.0:
+            conv_cache = None if cache is None else cache.setdefault("convolution", {})
+            if conv_cache is not None and norm_key in conv_cache:
+                conv = conv_cache[norm_key]
+            else:
+                conv = normalized.dot(normalized.T).dot(normalized).toarray()
+                conv = torch.as_tensor(conv, dtype=torch.float32, device=self.device)
+                conv_denominator = conv.sum(dim=1, keepdim=True)
+                conv_denominator[conv_denominator == 0] = 1.0
+                conv = conv / conv_denominator
+                if conv_cache is not None:
+                    limit = int(cache.get("max_convolution_entries", 1))
+                    while len(conv_cache) >= limit:
+                        conv_cache.pop(next(iter(conv_cache)))
+                    conv_cache[norm_key] = conv
+            scores = scores + float(gamma) * conv
+            # Do not delete the cached tensor; only release the local alias.
+            if conv_cache is None:
+                del conv
+        if norm_cache is None:
+            del normalized, adjacency
+        return scores
+
+    def S_DAN(self, model="RLAE_DAN", reg_p=20.0, alpha=0.2,
+              beta=0.3, drop_p=0.6, xi=0.1, cache=None):
+        """Return the DAN user-item scoring matrix."""
+        key = (id(self), model, float(reg_p), float(alpha), float(beta),
+               float(drop_p), float(xi))
+        dan_cache = None if cache is None else cache.setdefault("dan", {})
+        if dan_cache is not None and key in dan_cache:
+            state = dan_cache[key]
+        else:
+            state = self.fit_dan(model=model, reg_p=reg_p, alpha=alpha,
+                                 beta=beta, drop_p=drop_p, xi=xi)
+            if dan_cache is not None:
+                limit = int(cache.get("max_dan_entries", 1))
+                while len(dan_cache) >= limit:
+                    dan_cache.pop(next(iter(dan_cache)))
+                dan_cache[key] = state
+        scores_np = np.asarray(self.R.dot(state["weights"]), dtype=np.float32)
+        scores_np[:, state["cold_items"]] = -np.inf
+        scores = torch.as_tensor(scores_np, dtype=torch.float32, device=self.device)
+        del scores_np
+        scores = torch.where(torch.isfinite(scores), scores, torch.zeros_like(scores))
+        denominator = scores.sum(dim=1, keepdim=True)
+        denominator[denominator == 0] = 1.0
+        return scores / denominator
+
     def _threshold_offdiag_graph(self, matrix):
         graph = matrix.tocsr(copy=True)
         graph.setdiag(0)
@@ -63,6 +164,9 @@ class TFmodel:
 
     def compute_homophily(self):
         """Compute SGFCF user/item homophily ratios."""
+        cached = getattr(self, "_homophily_cache", None)
+        if cached is not None:
+            return cached
         R = self.R.astype(np.float32).tocsr()
         R_csc = R.tocsc()
         item_graph = self._threshold_offdiag_graph(R.T.dot(R))
@@ -83,8 +187,11 @@ class TFmodel:
             edges, stamp = self._induced_edges(user_graph, nodes, marker, stamp)
             if len(nodes) > 1:
                 item_ratio[item] = edges / (len(nodes) * (len(nodes) - 1))
-        return (torch.as_tensor(user_ratio, dtype=torch.float32, device=self.device),
-                torch.as_tensor(item_ratio, dtype=torch.float32, device=self.device))
+        self._homophily_cache = (
+            torch.as_tensor(user_ratio, dtype=torch.float32, device=self.device),
+            torch.as_tensor(item_ratio, dtype=torch.float32, device=self.device),
+        )
+        return self._homophily_cache
 
     def individual_weight(self, value, homophily, beta_1=1.0, beta_2=1.0):
         """Compute the SGFCF adaptive eigenvalue response."""
@@ -159,7 +266,8 @@ class TFmodel:
     def build_combined_X(self, beta_1=1.0, beta_2=1.0, gamma=1.0,
                          dan_coefficient=1.0, dan_params=None,
                          alpha_i=0.2, lambda_i=1.0,
-                         alpha_u=0.2, lambda_u=1.0):
+                         alpha_u=0.2, lambda_u=1.0, cache=None,
+                         return_components=False):
         """Build a dense user-item score matrix for SGFCF+DAN testing.
 
         The SGFCF graph-filter scores and DAN autoencoder scores are computed
@@ -176,14 +284,39 @@ class TFmodel:
             item_scale = np.power(item_degree + float(lambda_i), -float(alpha_i))
         user_scale[~np.isfinite(user_scale)] = 0.0
         item_scale[~np.isfinite(item_scale)] = 0.0
-        normalized_interaction = sp.diags(user_scale).dot(
-            self.R
-        ).dot(sp.diags(item_scale)).tocsr()
-        normalized_adj = sp.bmat([
-            [None, normalized_interaction],
-            [normalized_interaction.T, None],
-        ], format="csr")
-        eigenvectors, eigenvalues = self.Eigendecomposition(normalized_adj)
+        norm_cache = None if cache is None else cache.setdefault("normalized", {})
+        norm_key = (float(alpha_i), float(lambda_i), float(alpha_u), float(lambda_u))
+        if norm_cache is not None and norm_key in norm_cache:
+            normalized_interaction, normalized_adj = norm_cache[norm_key]
+        else:
+            normalized_interaction = sp.diags(user_scale).dot(
+                self.R
+            ).dot(sp.diags(item_scale)).tocsr()
+            normalized_adj = sp.bmat([
+                [None, normalized_interaction],
+                [normalized_interaction.T, None],
+            ], format="csr")
+            if norm_cache is not None:
+                max_entries = cache.get("max_normalized_entries", 1)
+                while len(norm_cache) >= int(max_entries):
+                    norm_cache.pop(next(iter(norm_cache)))
+                norm_cache[norm_key] = (normalized_interaction, normalized_adj)
+        # Eigenspaces depend only on normalization parameters and k, not on
+        # beta, gamma, DAN parameters, or the mixing coefficient.  Reuse them
+        # across candidates when a cache is supplied by the caller.
+        eig_cache = None if cache is None else cache.setdefault("eigen", {})
+        eig_key = (int(self.k), float(alpha_i), float(lambda_i),
+                   float(alpha_u), float(lambda_u))
+        if eig_cache is not None and eig_key in eig_cache:
+            eigenvectors, eigenvalues = eig_cache[eig_key]
+        else:
+            eigenvectors, eigenvalues = self.Eigendecomposition(normalized_adj)
+            if eig_cache is not None:
+                max_entries = cache.get("max_eigen_entries")
+                if max_entries is not None and max_entries > 0:
+                    while len(eig_cache) >= int(max_entries):
+                        eig_cache.pop(next(iter(eig_cache)))
+                eig_cache[eig_key] = (eigenvectors, eigenvalues)
         user_homophily, item_homophily = self.compute_homophily()
         homophily = torch.cat((user_homophily, item_homophily))
         response = self.individual_weight(
@@ -214,18 +347,29 @@ class TFmodel:
 
         # DAN autoencoder scores from the same training interaction matrix.
         dan_options = dict(dan_params or {})
-        dan_options.pop("alpha", None)
-        dan_options.pop("beta", None)
-        dan_state = self.fit_dan(
-            interactions=self.R,
-            alpha=0.0,
-            beta=0.0,
-            alpha_i=alpha_i,
-            lambda_i=lambda_i,
-            alpha_u=alpha_u,
-            lambda_u=lambda_u,
-            **dan_options,
-        )
+        dan_alpha = float(dan_options.pop("alpha", 0.0))
+        dan_beta = float(dan_options.pop("beta", 0.0))
+        dan_cache = None if cache is None else cache.setdefault("dan", {})
+        dan_key = (float(alpha_i), float(lambda_i), float(alpha_u),
+                   float(lambda_u), tuple(sorted(dan_options.items())))
+        if dan_cache is not None and dan_key in dan_cache:
+            dan_state = dan_cache[dan_key]
+        else:
+            dan_state = self.fit_dan(
+                interactions=self.R,
+                alpha=dan_alpha,
+                beta=dan_beta,
+                alpha_i=alpha_i,
+                lambda_i=lambda_i,
+                alpha_u=alpha_u,
+                lambda_u=lambda_u,
+                **dan_options,
+            )
+            if dan_cache is not None:
+                max_entries = cache.get("max_dan_entries", 1)
+                while len(dan_cache) >= int(max_entries):
+                    dan_cache.pop(next(iter(dan_cache)))
+                dan_cache[dan_key] = dan_state
         # Score DAN with the same normalized interaction matrix used to fit
         # the model, rather than reverting to the raw interaction matrix.
         dan_scores = np.asarray(
@@ -240,12 +384,12 @@ class TFmodel:
         dan_sum[dan_sum == 0] = 1.0
         dan_for_sum = dan_for_sum / dan_sum
 
-        if convolution is None:
-            X = torch.sigmoid(graph_scores
-                              + float(dan_coefficient) * dan_for_sum)
-        else:
-            X = torch.sigmoid(graph_scores + gamma_value * convolution
-                              + float(dan_coefficient) * dan_for_sum)
+        sgfcf_scores = graph_scores if convolution is None else (
+            graph_scores + gamma_value * convolution
+        )
+        if return_components:
+            return {"sgfcf": sgfcf_scores, "dan": dan_for_sum}
+        X = torch.sigmoid(sgfcf_scores + float(dan_coefficient) * dan_for_sum)
         cold_items = np.asarray(self.R.sum(axis=0)).ravel() == 0
         X[:, torch.as_tensor(cold_items, device=self.device)] = -(1 << 10)
         return X
