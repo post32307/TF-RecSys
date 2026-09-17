@@ -1,10 +1,12 @@
 import world
+import math
 import torch
 from dataloader import BasicDataset
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse.linalg import eigs
 from scipy.sparse.linalg import eigsh
+from scipy.sparse.linalg import svds
 import torch.nn.functional as F
 
 import metrics
@@ -14,6 +16,23 @@ import multiprocessing
 import torch.nn as nn
 
 
+
+
+class LinearScoreMatrix:
+    """Combine stored score matrices only for the users being evaluated."""
+
+    def __init__(self, first, second, weight):
+        if first.shape != second.shape:
+            raise ValueError("Ensemble score matrices must have the same shape.")
+        self.first, self.second = first, second
+        self.weight = float(weight)
+        self.shape = first.shape
+
+    def get_rows(self, users, device):
+        # Index on each source's device before transferring the small batch.
+        first = self.first[torch.as_tensor(users, device=self.first.device)].to(device)
+        second = self.second[torch.as_tensor(users, device=self.second.device)].to(device)
+        return first * self.weight + second * (1.0 - self.weight)
 
 
 class TFmodel:
@@ -72,15 +91,21 @@ class TFmodel:
         eigen_cache = None if cache is None else cache.setdefault("eigen", {})
         key = (model_key, int(self.k), float(alpha), float(eps))
         if eigen_cache is not None and key in eigen_cache:
-            vectors, values = eigen_cache[key]
+            vectors_cpu, values_cpu = eigen_cache[key]
+            vectors = vectors_cpu.to(self.device)
+            values = values_cpu.to(self.device)
         else:
             vectors, values = self.Eigendecomposition(adjacency)
             if eigen_cache is not None:
                 limit = int(cache.get("max_eigen_entries", 1))
                 while len(eigen_cache) >= limit:
                     eigen_cache.pop(next(iter(eigen_cache)))
-                eigen_cache[key] = (vectors, values)
-        hu, hi = self.compute_homophily()
+                # Keep the reusable eigenspace in host memory.  Only this
+                # candidate's copy is moved to the accelerator below.
+                eigen_cache[key] = (vectors.detach().cpu(), values.detach().cpu())
+        hu_cpu, hi_cpu = self.compute_homophily()
+        hu = hu_cpu.to(self.device)
+        hi = hi_cpu.to(self.device)
         response = self.individual_weight(torch.abs(values).clamp_min(1e-12),
                                            torch.cat((hu, hi)), beta_1, beta_2)
         weighted = vectors * response
@@ -94,7 +119,7 @@ class TFmodel:
         if float(gamma) != 0.0:
             conv_cache = None if cache is None else cache.setdefault("convolution", {})
             if conv_cache is not None and norm_key in conv_cache:
-                conv = conv_cache[norm_key]
+                conv = conv_cache[norm_key].to(self.device)
             else:
                 conv = normalized.dot(normalized.T).dot(normalized).toarray()
                 conv = torch.as_tensor(conv, dtype=torch.float32, device=self.device)
@@ -105,7 +130,7 @@ class TFmodel:
                     limit = int(cache.get("max_convolution_entries", 1))
                     while len(conv_cache) >= limit:
                         conv_cache.pop(next(iter(conv_cache)))
-                    conv_cache[norm_key] = conv
+                    conv_cache[norm_key] = conv.detach().cpu()
             scores = scores + float(gamma) * conv
             # Do not delete the cached tensor; only release the local alias.
             if conv_cache is None:
@@ -138,6 +163,206 @@ class TFmodel:
         denominator = scores.sum(dim=1, keepdim=True)
         denominator[denominator == 0] = 1.0
         return scores / denominator
+
+    def _normalize_scores(self, scores):
+        """Convert a NumPy/SciPy score result to a safe row-normalized tensor."""
+        if not torch.is_tensor(scores):
+            scores = torch.as_tensor(np.asarray(scores), dtype=torch.float32,
+                                     device=self.device)
+        scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+        denominator = scores.sum(dim=1, keepdim=True)
+        denominator[denominator == 0] = 1.0
+        return scores / denominator
+
+    def S_EASE(self, lambda_=50.0, cache=None):
+        """EASE scoring adapter using the closed-form DAN implementation."""
+        return self.S_DAN(model="EASE_DAN", reg_p=lambda_, alpha=0.0,
+                          beta=0.0, drop_p=0.0, xi=0.1, cache=cache)
+
+    def S_GF_CF(self, k=None, cache=None):
+        """GF-CF scoring adapter following the reference propagation formula."""
+        rank = int(k or self.k)
+        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
+        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
+        user_inv = np.zeros_like(user_degree, dtype=np.float64)
+        item_inv = np.zeros_like(item_degree, dtype=np.float64)
+        np.power(np.maximum(user_degree, 1.0), -0.5, out=user_inv)
+        np.power(np.maximum(item_degree, 1.0), -0.5, out=item_inv)
+        user_inv[user_degree == 0] = 0.0
+        item_inv[item_degree == 0] = 0.0
+        normalized = sp.diags(user_inv).dot(self.R).dot(sp.diags(item_inv)).tocsr()
+        propagation = self.R.dot(normalized.T).dot(normalized).toarray()
+        if rank >= min(normalized.shape):
+            rank = max(1, min(normalized.shape) - 1)
+        _, vectors = eigsh(normalized.T.dot(normalized), k=rank, which="LA")
+        spectral = self.R.dot(sp.diags(item_inv)).dot(vectors).dot(vectors.T)
+        return self._normalize_scores(propagation + 0.3 * spectral)
+
+    @torch.no_grad()
+    def S_ChebyCF(self, K=8, phi=1.5, eta=256, alpha=0.1,
+                  beta=0.2, cache=None, batch_size=256, normalize=True,
+                  implementation_version=2):
+        """Reference ChebyCF, with sparse batched filtering and CPU scores.
+
+        ``normalize=False`` returns the reference's raw, unmasked scores.
+        By default, apply the row normalization used by the ensemble adapters.
+        Only the current user batch and active sparse/spectral factors live
+        on the calculation device. Cached factors always reside on CPU.
+        """
+        if implementation_version != 2:
+            raise ValueError("ChebyCF parameters must be revalidated for implementation 2.")
+        K, eta, batch_size = int(K), int(eta), int(batch_size)
+        if K < 1 or batch_size < 1:
+            raise ValueError("ChebyCF requires K >= 1 and batch_size >= 1.")
+        ideal_enabled = eta > 0 and alpha > 0
+        if ideal_enabled and eta >= min(self.R.shape):
+            raise ValueError("eta must be smaller than min(num_users, num_items).")
+
+        # One dataset's normalization, one exact-rank SVD, and at most six
+        # small coefficient vectors. No full score matrices are cached here.
+        state = None if cache is None else cache.get("chebycf")
+        if state is None or state["owner"] is not self:
+            interactions = self.R.astype(np.float32)
+            user_degree = np.asarray(interactions.sum(axis=1)).ravel()
+            item_degree = np.asarray(interactions.sum(axis=0)).ravel()
+            du = np.power(user_degree.clip(min=1), -0.5)
+            di = np.power(item_degree.clip(min=1), -0.5)
+            du[user_degree == 0] = 0
+            di[item_degree == 0] = 0
+            normalized = (sp.diags(du) @ interactions @ sp.diags(di)).tocoo()
+            sparse_cpu = torch.sparse_coo_tensor(
+                torch.from_numpy(np.vstack((normalized.row, normalized.col))),
+                torch.from_numpy(normalized.data), normalized.shape).coalesce()
+            state = {"owner": self, "normalized": normalized,
+                     "sparse": sparse_cpu, "degree": torch.from_numpy(item_degree),
+                     "coefficients": {}, "ideal": None, "eta": None}
+            if cache is not None:
+                cache["chebycf"] = state
+
+        coeff_key = (K, float(phi))
+        if coeff_key not in state["coefficients"]:
+            # Match ChebyFilter.plateau()/fit(), including its rounding.
+            x = torch.cos((K - torch.arange(K + 1)) / K * math.pi).round(decimals=3)
+            target = torch.zeros_like(x)
+            target[x < 0] = (-x[x < 0]).pow(float(phi)) * 0.5 + 0.5
+            target[x >= 0] = x[x >= 0].pow(float(phi)) * -0.5 + 0.5
+            target = target.round(decimals=3)
+            nodes = torch.cos(((K + 1) + 0.5 - torch.arange(1, K + 2)) / (K + 1) * math.pi)
+            terms = [target, nodes * target]
+            for _ in range(2, K + 1):
+                terms.append(nodes * terms[-1] * 2 - terms[-2])
+            coeff = torch.stack(terms).sum(dim=1) * (2 / (K + 1))
+            coeff[0] /= 2
+            if len(state["coefficients"]) >= 6:
+                state["coefficients"].pop(next(iter(state["coefficients"])))
+            state["coefficients"][coeff_key] = coeff
+        coeff = state["coefficients"][coeff_key].to(self.device)
+
+        if ideal_enabled and state["eta"] != eta:
+            state["ideal"] = None  # Release the previous rank before fitting.
+            _, _, vt = svds(state["normalized"], which="LM", k=eta)
+            state["ideal"] = torch.from_numpy(vt.T.copy())
+            state["eta"] = eta
+        ideal = state["ideal"].to(self.device) if ideal_enabled else None
+        norm_r = state["sparse"].to(self.device)
+        norm_rt = norm_r.transpose(0, 1).coalesce()
+        degree = state["degree"].to(self.device)
+        if beta > 0:
+            pre = degree.clamp(min=1).pow(-float(beta))
+            post = degree.clamp(min=1).pow(float(beta))
+            pre[degree == 0] = 0
+            post[degree == 0] = 0
+
+        def laplacian(signal):
+            propagated = torch.sparse.mm(norm_r, signal)
+            return torch.sparse.mm(norm_rt, propagated).mul_(-2).add_(signal)
+
+        scores = torch.empty(self.R.shape, dtype=torch.float32, device="cpu")
+        for start in range(0, self.R.shape[0], batch_size):
+            stop = min(start + batch_size, self.R.shape[0])
+            signal = torch.as_tensor(self.R[start:stop].toarray(),
+                                     dtype=torch.float32, device=self.device)
+            if beta > 0:
+                signal.mul_(pre)
+            previous = signal.T
+            current = laplacian(previous)
+            output = previous * coeff[0] + current * coeff[1]
+            for order in range(2, K + 1):
+                following = laplacian(current).mul_(2).sub_(previous)
+                output.add_(following * coeff[order])
+                previous, current = current, following
+                del following
+            del previous, current
+            output = output.T
+            if ideal is not None:
+                output.add_((signal @ ideal @ ideal.T) * float(alpha))
+            if beta > 0:
+                output.mul_(post)
+            if normalize:
+                output = self._normalize_scores(output)
+            scores[start:stop].copy_(output.cpu())
+            del signal, output
+        return scores
+
+    def S_PGSP(self, k=256, phi=0.7, cache=None):
+        """PGSP scoring adapter using its P0/P1 propagation components."""
+        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
+        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
+        du = np.power(np.maximum(user_degree, 1.0), -0.5)
+        di = np.power(np.maximum(item_degree, 1.0), -0.5)
+        du[user_degree == 0] = 0.0
+        di[item_degree == 0] = 0.0
+        normalized = sp.diags(du).dot(self.R).dot(sp.diags(di)).tocsr()
+        p0 = self.R.dot(sp.diags(di)).dot(sp.diags(di)).toarray()
+        rank = min(int(k), min(normalized.shape) - 1)
+        _, vectors = eigsh(normalized.T.dot(normalized), k=max(1, rank), which="LA")
+        # ``normalized.dot(vectors)`` is dense because ``vectors`` is a
+        # NumPy array; calling ``toarray`` on the result therefore fails.
+        # Convert either sparse or dense results through ``np.asarray``.
+        p1 = np.asarray(normalized.dot(vectors).dot(vectors.T))
+        return self._normalize_scores(float(phi) * p0 + (1.0 - float(phi)) * p1)
+
+    def S_BSPM(self, k=None, alpha=0.5, beta=0.5, gamma=1.0,
+               cache=None, **kwargs):
+        """BSPM-compatible propagation adapter returning user-item scores."""
+        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
+        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
+        du = np.power(np.maximum(user_degree, 1.0), -float(alpha))
+        di = np.power(np.maximum(item_degree, 1.0), -float(beta))
+        du[user_degree == 0] = 0.0
+        di[item_degree == 0] = 0.0
+        normalized = sp.diags(du).dot(self.R).dot(sp.diags(di)).tocsr()
+        scores = self.R.dot(normalized.T).dot(normalized).toarray()
+        if float(gamma) != 0.0:
+            scores += float(gamma) * normalized.toarray()
+        return self._normalize_scores(scores)
+
+    def S_TurboCF(self, alpha=0.5, power=1.0, filter=1, cache=None):
+        """TurboCF sparse polynomial item-graph filtering adapter."""
+        rows = np.asarray(self.R.sum(axis=1)).ravel()
+        cols = np.asarray(self.R.sum(axis=0)).ravel()
+        row_scale = np.power(rows + 1e-12, -float(alpha))
+        col_scale = np.power(cols + 1e-12, float(alpha) - 1.0)
+        normalized = sp.diags(row_scale).dot(self.R).dot(sp.diags(col_scale)).tocsr()
+        item_graph = normalized.T.dot(normalized).tocsr()
+        if item_graph.nnz:
+            item_graph.data = np.where(
+                item_graph.data > 1e-6,
+                np.power(item_graph.data, float(power)),
+                0.0,
+            )
+            item_graph.eliminate_zeros()
+        if int(filter) == 1:
+            filtered = item_graph
+        elif int(filter) == 2:
+            filtered = 2.0 * item_graph - item_graph.dot(item_graph)
+        elif int(filter) == 3:
+            p2 = item_graph.dot(item_graph)
+            p3 = p2.dot(item_graph)
+            filtered = item_graph + 0.01 * (-p3 + 10.0 * p2 - 29.0 * item_graph)
+        else:
+            raise ValueError("TurboCF filter must be 1, 2, or 3")
+        return self._normalize_scores(self.R.dot(filtered).toarray())
 
     def _threshold_offdiag_graph(self, matrix):
         graph = matrix.tocsr(copy=True)
@@ -187,9 +412,11 @@ class TFmodel:
             edges, stamp = self._induced_edges(user_graph, nodes, marker, stamp)
             if len(nodes) > 1:
                 item_ratio[item] = edges / (len(nodes) * (len(nodes) - 1))
+        # Homophily is reused across many filter candidates, so retain it on
+        # the CPU and transfer only the current copy used by SGFCF.
         self._homophily_cache = (
-            torch.as_tensor(user_ratio, dtype=torch.float32, device=self.device),
-            torch.as_tensor(item_ratio, dtype=torch.float32, device=self.device),
+            torch.as_tensor(user_ratio, dtype=torch.float32),
+            torch.as_tensor(item_ratio, dtype=torch.float32),
         )
         return self._homophily_cache
 
@@ -318,7 +545,8 @@ class TFmodel:
                         eig_cache.pop(next(iter(eig_cache)))
                 eig_cache[eig_key] = (eigenvectors, eigenvalues)
         user_homophily, item_homophily = self.compute_homophily()
-        homophily = torch.cat((user_homophily, item_homophily))
+        homophily = torch.cat((user_homophily.to(self.device),
+                               item_homophily.to(self.device)))
         response = self.individual_weight(
             torch.clamp(torch.abs(eigenvalues), min=1e-12),
             homophily,
@@ -551,6 +779,8 @@ class TFmodel:
 
     def Test_RatingMatrix(self, X, dataset, users=None, items=None, multicore=0):
         u_batch_size = world.config['test_u_batch_size']
+        if isinstance(X, LinearScoreMatrix) or (torch.is_tensor(X) and X.device.type == "cpu"):
+            u_batch_size = min(u_batch_size, 256)
         testDict: dict = dataset.testDict
         max_K = max(world.topks)
         results = {'precision': np.zeros(len(world.topks)),
@@ -590,9 +820,11 @@ class TFmodel:
                     groundTrue = [list(items_set.intersection(testDict[u])) for u in batch_users]
                 else:
                     groundTrue = [testDict[u] for u in batch_users]
-                batch_users_gpu = torch.Tensor(batch_users).long()
-                batch_users_gpu = batch_users_gpu.to(world.device)
-                rating = X[batch_users_gpu]
+                if isinstance(X, LinearScoreMatrix):
+                    rating = X.get_rows(batch_users, self.device)
+                else:
+                    indices = torch.as_tensor(batch_users, dtype=torch.long, device=X.device)
+                    rating = X[indices].to(self.device)
                 exclude_index = []
                 exclude_items = []
                 for range_i, items_pos in enumerate(allPos):
@@ -602,7 +834,6 @@ class TFmodel:
                 
                 
                 _, rating_K = torch.topk(rating, k=max_K)
-                rating = rating.cpu().numpy()
                 del rating
                 users_list.append(batch_users)
                 rating_list.append(rating_K.cpu())

@@ -26,6 +26,15 @@ def parse_args():
     parser.add_argument('--seed', type=int, default=2020, help='random seed')
     
     parser.add_argument('--model', type=str, default='pse-model')
+
+    parser.add_argument('--params_filename', type=str, default='params',
+                        help='Parameter log filename (without .txt)')
+
+    parser.add_argument('--ensemble_models', nargs='+',
+                        default=['DAN', 'SGFCF'],
+                        choices=['BSPM', 'EASE', 'GF-CF', 'PGSP',
+                                 'TurboCF', 'SGFCF', 'ChebyCF', 'DAN'],
+                        help='Models to include in the ensemble')
     
     parser.add_argument('--gpu_ID', type=int, default=0)
     

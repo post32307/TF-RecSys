@@ -34,6 +34,8 @@ seed = args.seed
 
 dataset = args.dataset
 model_name = args.model
+ensemble_models = args.ensemble_models
+params_filename = args.params_filename
 if dataset not in all_dataset:
     raise NotImplementedError(f"Haven't supported {dataset} yet!, try {all_dataset}")
 if model_name not in all_models:

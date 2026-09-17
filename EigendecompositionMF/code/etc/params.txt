@@ -1,7 +1,12 @@
 amazon-CD : 2020 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}
+amazon-CD : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}
+amazon-CD : 2020 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
 amazon-CD : 2026 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 512}
+amazon-CD : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}
+amazon-CD : 2026 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
 amazon-CD : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}
 amazon-CD : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}
+amazon-CD : 42 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}}
 amazon-electronics : 2020 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 16}
 amazon-electronics : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.3}
 amazon-electronics : 2020 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 16}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
