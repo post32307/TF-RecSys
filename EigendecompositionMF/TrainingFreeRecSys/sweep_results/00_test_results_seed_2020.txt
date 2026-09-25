@@ -1,22 +1,5 @@
 Final Test Results Summary (Seed: 2020)
 Run started:
-Thu Jul  2 09:49:23 2026 : BSPM / amazon-electronics
-Thu Jul  2 17:28:18 2026 : BSPM / epinions
-Fri Jul  3 11:04:14 2026 : BSPM / amazon-CD
-Fri Jul  3 16:07:05 2026 : BSPM / news
-Sat Jul  4 09:50:09 2026 : BSPM / gowalla
-Thu Jul 30 12:21:13 2026 : DAN / amazon-electronics
-Thu Jul 30 12:26:26 2026 : DAN / citeulike
-Thu Jul 30 12:30:51 2026 : DAN / citeulike
-Thu Jul 30 13:19:54 2026 : DAN / epinions
-Thu Jul 30 17:54:44 2026 : ChebyCF / epinions
-Fri Jul 31 09:57:16 2026 : HiGSP / amazon-electronics
-Fri Jul 31 10:34:41 2026 : HiGSP / amazon-electronics
-Fri Jul 31 10:46:27 2026 : HiGSP / amazon-electronics
-Sun Aug  2 22:51:17 2026 : FaGSP / amazon-electronics
-Mon Aug  3 10:42:00 2026 : DAN / amazon-electronics
-Thu Aug 13 18:44:39 2026 : SGFCF / amazon-book
-Fri Aug 14 08:05:30 2026 : SGFCF / amazon-book
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------

@@ -1,54 +1,61 @@
 amazon-CD : 2020 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}
 amazon-CD : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}
-amazon-CD : 2020 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
 amazon-CD : 2026 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 512}
 amazon-CD : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}
-amazon-CD : 2026 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
 amazon-CD : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}
 amazon-CD : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}
-amazon-CD : 42 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}}
 amazon-electronics : 2020 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 16}
-amazon-electronics : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.3}
-amazon-electronics : 2020 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 16}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
+amazon-electronics : 2020 : DAN : [{'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.3}, {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.5}, {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.1}, {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}, {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.3}, {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.5}, {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}, {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.3}, {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.5}, {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}]
+amazon-electronics : 2020 : Ensemble_3Way : {'sgfcf_params': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.1, 'k': 32}, 'ease_i_params': {'lambda_': 50.0}, 'ease_u_params': {'lambda_': 1000.0}, 'gamma_i': 0.0, 'gamma_u': 0.1} : Precision 0.01522648 / Recall 0.13606341 / NDCG 0.07349459
+amazon-electronics : 2020 : IGF_EASE : {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'lambda_': 50, 'gamma': 0.1, 'k': 16} : Precision 0.01620209 / Recall 0.14115079 / NDCG 0.07655754
+amazon-electronics : 2020 : S_EASE : {'lambda_': 200.0} : Precision 0.01571429 / Recall 0.13166459 / NDCG 0.07387735
+amazon-electronics : 2020 : S_EASE_I : {'lambda_': 200.0} : Precision 0.01571429 / Recall 0.13166459 / NDCG 0.07387735
+amazon-electronics : 2020 : S_EASE_U : {'lambda_': 500.0} : Precision 0.01456446 / Recall 0.12378533 / NDCG 0.07073451
+amazon-electronics : 2020 : S_SGFCF : {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 16} : Precision 0.01613240 / Recall 0.13879003 / NDCG 0.07600968
 amazon-electronics : 2026 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 32}
 amazon-electronics : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}
-amazon-electronics : 2026 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 0.0, 'eps': 0.3, 'gamma': 0.1, 'k': 32}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
 amazon-electronics : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 0.0, 'eps': 0.5, 'gamma': 1.0, 'k': 16}
 amazon-electronics : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}
-amazon-electronics : 42 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 0.0, 'eps': 0.5, 'gamma': 1.0, 'k': 16}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
 citeulike : 2020 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 1.0, 'k': 1024}
 citeulike : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.1}
-citeulike : 2020 : ensemble : {'a_sum': 0.1, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 1.0, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.1}}
 citeulike : 2026 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 1024}
 citeulike : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.1}
-citeulike : 2026 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.1}}
 citeulike : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 1024}
 citeulike : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}
-citeulike : 42 : ensemble : {'a_sum': 0.1, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}}
 douban-book : 2020 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 1024}
 douban-book : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}
-douban-book : 2020 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}}
 douban-book : 2026 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 512}
 douban-book : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}
-douban-book : 2026 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 512}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.2, 'xi': 0.5}}
 douban-book : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 1024}
 douban-book : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}
-douban-book : 42 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}}
 lastfm : 2020 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 1.0, 'k': 128}
 lastfm : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}
-lastfm : 2020 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 1.0, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}}
 lastfm : 2026 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 0.5, 'k': 128}
 lastfm : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}
-lastfm : 2026 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 64}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
 lastfm : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 0.5, 'k': 128}
 lastfm : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}
-lastfm : 42 : ensemble : {'a_sum': 0.9, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 0.0, 'eps': 0.3, 'gamma': 0.1, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
 yelp : 2020 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 128}
 yelp : 2020 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.5}
-yelp : 2020 : ensemble : {'a_sum': 0.9, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
 yelp : 2026 : SGFCF : {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 64}
 yelp : 2026 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.5}
-yelp : 2026 : ensemble : {'a_sum': 0.9, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 64}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.5}}
 yelp : 42 : SGFCF : {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 128}
 yelp : 42 : DAN : {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}
+
+amazon-CD : 2020 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
+amazon-CD : 2026 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
+amazon-CD : 42 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 256}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}}
+amazon-electronics : 2020 : ensemble:DAN+IGF_EASE : {'a_sum': 0.3, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}, 'IGF_EASE': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'lambda_': 500, 'gamma': 0.1, 'k': 16}} : Precision 0.01662021 / Recall 0.14200639 / NDCG 0.07711412
+amazon-electronics : 2026 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 0.0, 'eps': 0.3, 'gamma': 0.1, 'k': 32}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
+amazon-electronics : 42 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 0.0, 'eps': 0.5, 'gamma': 1.0, 'k': 16}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
+citeulike : 2020 : ensemble : {'a_sum': 0.1, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 1.0, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.1}}
+citeulike : 2026 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.1}}
+citeulike : 42 : ensemble : {'a_sum': 0.1, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.6, 'xi': 0.3}}
+douban-book : 2020 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}}
+douban-book : 2026 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 512}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.1, 'beta': 0.1, 'drop_p': 0.2, 'xi': 0.5}}
+douban-book : 42 : ensemble : {'a_sum': 0.3, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 1024}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.3, 'drop_p': 0.2, 'xi': 0.5}}
+lastfm : 2020 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 1.0, 'eps': 0.3, 'gamma': 1.0, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.3}}
+lastfm : 2026 : ensemble : {'a_sum': 0.5, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 64}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.5, 'drop_p': 0.6, 'xi': 0.1}}
+lastfm : 42 : ensemble : {'a_sum': 0.9, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.1, 'alpha': 0.0, 'eps': 0.3, 'gamma': 0.1, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
+yelp : 2020 : ensemble : {'a_sum': 0.9, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}
+yelp : 2026 : ensemble : {'a_sum': 0.9, 'SGFCF': {'beta_1': 0.8, 'beta_2': 1.1, 'alpha': 20.0, 'eps': 0.5, 'gamma': 0.5, 'k': 64}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 20.0, 'alpha': 0.1, 'beta': 0.5, 'drop_p': 0.2, 'xi': 0.5}}
 yelp : 42 : ensemble : {'a_sum': 0.7, 'SGFCF': {'beta_1': 1.0, 'beta_2': 1.3, 'alpha': 20.0, 'eps': 0.5, 'gamma': 1.0, 'k': 128}, 'DAN': {'model': 'RLAE_DAN', 'reg_p': 50.0, 'alpha': 0.3, 'beta': 0.3, 'drop_p': 0.6, 'xi': 0.1}}

@@ -35,6 +35,72 @@ class LinearScoreMatrix:
         return first * self.weight + second * (1.0 - self.weight)
 
 
+class LowRankEASEUScoreMatrix:
+    """Compute User-based EASE low-rank approximate scores on the fly for small batches."""
+
+    def __init__(self, X, k=500, lambda_=50.0):
+        self.X = X
+        self.shape = X.shape
+        import numpy as np
+        from scipy.sparse.linalg import svds
+        
+        k = min(k, min(X.shape) - 1)
+        
+        U, S, Vt = svds(X.astype(np.float32), k=k)
+        
+        Lambda = S ** 2
+        self.D = Lambda / (Lambda + float(lambda_))
+        self.U = U
+        self.lambda_ = float(lambda_)
+        
+        self.z = np.sum((U ** 2) * self.D, axis=1)
+        self.Ut_X = self.U.T @ self.X
+
+    def get_rows(self, users, device):
+        import torch
+        U_batch = self.U[users]
+        z_batch = self.z[users]
+        
+        U_D_batch = U_batch * self.D
+        pred_batch = U_D_batch @ self.Ut_X
+        
+        X_batch = self.X[users].toarray()
+        
+        denom = 1.0 - z_batch[:, None]
+        denom[denom == 0] = 1e-9
+        pred_batch = (pred_batch - z_batch[:, None] * X_batch) / denom
+        
+        return torch.as_tensor(pred_batch, dtype=torch.float32, device=device)
+
+
+class Ensemble3WayScoreMatrix:
+    """Combine S_SGFCF, S_EASE_I, S_EASE_U."""
+
+    def __init__(self, sgfcf, ease_i, ease_u, gamma_i, gamma_u):
+        self.sgfcf = sgfcf
+        self.ease_i = ease_i
+        self.ease_u = ease_u
+        self.gamma_i = float(gamma_i)
+        self.gamma_u = float(gamma_u)
+        self.gamma_sgfcf = 1.0 - self.gamma_i - self.gamma_u
+        self.shape = sgfcf.shape
+
+    def get_rows(self, users, device):
+        import torch
+        def _get(mat):
+            if hasattr(mat, "get_rows"):
+                return mat.get_rows(users, device).to(device)
+            else:
+                indices = torch.as_tensor(users, dtype=torch.long, device=mat.device)
+                return mat[indices].to(device)
+                
+        s = _get(self.sgfcf)
+        ei = _get(self.ease_i)
+        eu = _get(self.ease_u)
+        
+        return s * self.gamma_sgfcf + ei * self.gamma_i + eu * self.gamma_u
+
+
 class TFmodel:
 
     def __init__(self, config: dict, dataset: BasicDataset):
@@ -56,6 +122,21 @@ class TFmodel:
 
 
     # Model Functions
+
+    def S_EASE_I(self, lambda_=50.0, cache=None):
+        X = self.R
+        G_I = X.T.dot(X).toarray()
+        diagIndices = np.diag_indices(G_I.shape[0])
+        G_I[diagIndices] += lambda_
+        P_I = np.linalg.inv(G_I)
+        B_I = P_I / (-np.diag(P_I))
+        B_I[diagIndices] = 0
+
+        pred = X.dot(B_I)
+        return torch.as_tensor(pred, dtype=torch.float32, device=self.device)
+
+    def S_EASE_U(self, lambda_=50.0, cache=None):
+        return LowRankEASEUScoreMatrix(self.R, k=self.k, lambda_=lambda_)
 
     def S_SGFCF(self, beta_1=1.0, beta_2=1.0, alpha=0.0,
                 eps=0.5, gamma=1.0, k=None, cache=None):
@@ -139,230 +220,6 @@ class TFmodel:
             del normalized, adjacency
         return scores
 
-    def S_DAN(self, model="RLAE_DAN", reg_p=20.0, alpha=0.2,
-              beta=0.3, drop_p=0.6, xi=0.1, cache=None):
-        """Return the DAN user-item scoring matrix."""
-        key = (id(self), model, float(reg_p), float(alpha), float(beta),
-               float(drop_p), float(xi))
-        dan_cache = None if cache is None else cache.setdefault("dan", {})
-        if dan_cache is not None and key in dan_cache:
-            state = dan_cache[key]
-        else:
-            state = self.fit_dan(model=model, reg_p=reg_p, alpha=alpha,
-                                 beta=beta, drop_p=drop_p, xi=xi)
-            if dan_cache is not None:
-                limit = int(cache.get("max_dan_entries", 1))
-                while len(dan_cache) >= limit:
-                    dan_cache.pop(next(iter(dan_cache)))
-                dan_cache[key] = state
-        scores_np = np.asarray(self.R.dot(state["weights"]), dtype=np.float32)
-        scores_np[:, state["cold_items"]] = -np.inf
-        scores = torch.as_tensor(scores_np, dtype=torch.float32, device=self.device)
-        del scores_np
-        scores = torch.where(torch.isfinite(scores), scores, torch.zeros_like(scores))
-        denominator = scores.sum(dim=1, keepdim=True)
-        denominator[denominator == 0] = 1.0
-        return scores / denominator
-
-    def _normalize_scores(self, scores):
-        """Convert a NumPy/SciPy score result to a safe row-normalized tensor."""
-        if not torch.is_tensor(scores):
-            scores = torch.as_tensor(np.asarray(scores), dtype=torch.float32,
-                                     device=self.device)
-        scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
-        denominator = scores.sum(dim=1, keepdim=True)
-        denominator[denominator == 0] = 1.0
-        return scores / denominator
-
-    def S_EASE(self, lambda_=50.0, cache=None):
-        """EASE scoring adapter using the closed-form DAN implementation."""
-        return self.S_DAN(model="EASE_DAN", reg_p=lambda_, alpha=0.0,
-                          beta=0.0, drop_p=0.0, xi=0.1, cache=cache)
-
-    def S_GF_CF(self, k=None, cache=None):
-        """GF-CF scoring adapter following the reference propagation formula."""
-        rank = int(k or self.k)
-        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
-        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
-        user_inv = np.zeros_like(user_degree, dtype=np.float64)
-        item_inv = np.zeros_like(item_degree, dtype=np.float64)
-        np.power(np.maximum(user_degree, 1.0), -0.5, out=user_inv)
-        np.power(np.maximum(item_degree, 1.0), -0.5, out=item_inv)
-        user_inv[user_degree == 0] = 0.0
-        item_inv[item_degree == 0] = 0.0
-        normalized = sp.diags(user_inv).dot(self.R).dot(sp.diags(item_inv)).tocsr()
-        propagation = self.R.dot(normalized.T).dot(normalized).toarray()
-        if rank >= min(normalized.shape):
-            rank = max(1, min(normalized.shape) - 1)
-        _, vectors = eigsh(normalized.T.dot(normalized), k=rank, which="LA")
-        spectral = self.R.dot(sp.diags(item_inv)).dot(vectors).dot(vectors.T)
-        return self._normalize_scores(propagation + 0.3 * spectral)
-
-    @torch.no_grad()
-    def S_ChebyCF(self, K=8, phi=1.5, eta=256, alpha=0.1,
-                  beta=0.2, cache=None, batch_size=256, normalize=True,
-                  implementation_version=2):
-        """Reference ChebyCF, with sparse batched filtering and CPU scores.
-
-        ``normalize=False`` returns the reference's raw, unmasked scores.
-        By default, apply the row normalization used by the ensemble adapters.
-        Only the current user batch and active sparse/spectral factors live
-        on the calculation device. Cached factors always reside on CPU.
-        """
-        if implementation_version != 2:
-            raise ValueError("ChebyCF parameters must be revalidated for implementation 2.")
-        K, eta, batch_size = int(K), int(eta), int(batch_size)
-        if K < 1 or batch_size < 1:
-            raise ValueError("ChebyCF requires K >= 1 and batch_size >= 1.")
-        ideal_enabled = eta > 0 and alpha > 0
-        if ideal_enabled and eta >= min(self.R.shape):
-            raise ValueError("eta must be smaller than min(num_users, num_items).")
-
-        # One dataset's normalization, one exact-rank SVD, and at most six
-        # small coefficient vectors. No full score matrices are cached here.
-        state = None if cache is None else cache.get("chebycf")
-        if state is None or state["owner"] is not self:
-            interactions = self.R.astype(np.float32)
-            user_degree = np.asarray(interactions.sum(axis=1)).ravel()
-            item_degree = np.asarray(interactions.sum(axis=0)).ravel()
-            du = np.power(user_degree.clip(min=1), -0.5)
-            di = np.power(item_degree.clip(min=1), -0.5)
-            du[user_degree == 0] = 0
-            di[item_degree == 0] = 0
-            normalized = (sp.diags(du) @ interactions @ sp.diags(di)).tocoo()
-            sparse_cpu = torch.sparse_coo_tensor(
-                torch.from_numpy(np.vstack((normalized.row, normalized.col))),
-                torch.from_numpy(normalized.data), normalized.shape).coalesce()
-            state = {"owner": self, "normalized": normalized,
-                     "sparse": sparse_cpu, "degree": torch.from_numpy(item_degree),
-                     "coefficients": {}, "ideal": None, "eta": None}
-            if cache is not None:
-                cache["chebycf"] = state
-
-        coeff_key = (K, float(phi))
-        if coeff_key not in state["coefficients"]:
-            # Match ChebyFilter.plateau()/fit(), including its rounding.
-            x = torch.cos((K - torch.arange(K + 1)) / K * math.pi).round(decimals=3)
-            target = torch.zeros_like(x)
-            target[x < 0] = (-x[x < 0]).pow(float(phi)) * 0.5 + 0.5
-            target[x >= 0] = x[x >= 0].pow(float(phi)) * -0.5 + 0.5
-            target = target.round(decimals=3)
-            nodes = torch.cos(((K + 1) + 0.5 - torch.arange(1, K + 2)) / (K + 1) * math.pi)
-            terms = [target, nodes * target]
-            for _ in range(2, K + 1):
-                terms.append(nodes * terms[-1] * 2 - terms[-2])
-            coeff = torch.stack(terms).sum(dim=1) * (2 / (K + 1))
-            coeff[0] /= 2
-            if len(state["coefficients"]) >= 6:
-                state["coefficients"].pop(next(iter(state["coefficients"])))
-            state["coefficients"][coeff_key] = coeff
-        coeff = state["coefficients"][coeff_key].to(self.device)
-
-        if ideal_enabled and state["eta"] != eta:
-            state["ideal"] = None  # Release the previous rank before fitting.
-            _, _, vt = svds(state["normalized"], which="LM", k=eta)
-            state["ideal"] = torch.from_numpy(vt.T.copy())
-            state["eta"] = eta
-        ideal = state["ideal"].to(self.device) if ideal_enabled else None
-        norm_r = state["sparse"].to(self.device)
-        norm_rt = norm_r.transpose(0, 1).coalesce()
-        degree = state["degree"].to(self.device)
-        if beta > 0:
-            pre = degree.clamp(min=1).pow(-float(beta))
-            post = degree.clamp(min=1).pow(float(beta))
-            pre[degree == 0] = 0
-            post[degree == 0] = 0
-
-        def laplacian(signal):
-            propagated = torch.sparse.mm(norm_r, signal)
-            return torch.sparse.mm(norm_rt, propagated).mul_(-2).add_(signal)
-
-        scores = torch.empty(self.R.shape, dtype=torch.float32, device="cpu")
-        for start in range(0, self.R.shape[0], batch_size):
-            stop = min(start + batch_size, self.R.shape[0])
-            signal = torch.as_tensor(self.R[start:stop].toarray(),
-                                     dtype=torch.float32, device=self.device)
-            if beta > 0:
-                signal.mul_(pre)
-            previous = signal.T
-            current = laplacian(previous)
-            output = previous * coeff[0] + current * coeff[1]
-            for order in range(2, K + 1):
-                following = laplacian(current).mul_(2).sub_(previous)
-                output.add_(following * coeff[order])
-                previous, current = current, following
-                del following
-            del previous, current
-            output = output.T
-            if ideal is not None:
-                output.add_((signal @ ideal @ ideal.T) * float(alpha))
-            if beta > 0:
-                output.mul_(post)
-            if normalize:
-                output = self._normalize_scores(output)
-            scores[start:stop].copy_(output.cpu())
-            del signal, output
-        return scores
-
-    def S_PGSP(self, k=256, phi=0.7, cache=None):
-        """PGSP scoring adapter using its P0/P1 propagation components."""
-        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
-        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
-        du = np.power(np.maximum(user_degree, 1.0), -0.5)
-        di = np.power(np.maximum(item_degree, 1.0), -0.5)
-        du[user_degree == 0] = 0.0
-        di[item_degree == 0] = 0.0
-        normalized = sp.diags(du).dot(self.R).dot(sp.diags(di)).tocsr()
-        p0 = self.R.dot(sp.diags(di)).dot(sp.diags(di)).toarray()
-        rank = min(int(k), min(normalized.shape) - 1)
-        _, vectors = eigsh(normalized.T.dot(normalized), k=max(1, rank), which="LA")
-        # ``normalized.dot(vectors)`` is dense because ``vectors`` is a
-        # NumPy array; calling ``toarray`` on the result therefore fails.
-        # Convert either sparse or dense results through ``np.asarray``.
-        p1 = np.asarray(normalized.dot(vectors).dot(vectors.T))
-        return self._normalize_scores(float(phi) * p0 + (1.0 - float(phi)) * p1)
-
-    def S_BSPM(self, k=None, alpha=0.5, beta=0.5, gamma=1.0,
-               cache=None, **kwargs):
-        """BSPM-compatible propagation adapter returning user-item scores."""
-        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
-        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
-        du = np.power(np.maximum(user_degree, 1.0), -float(alpha))
-        di = np.power(np.maximum(item_degree, 1.0), -float(beta))
-        du[user_degree == 0] = 0.0
-        di[item_degree == 0] = 0.0
-        normalized = sp.diags(du).dot(self.R).dot(sp.diags(di)).tocsr()
-        scores = self.R.dot(normalized.T).dot(normalized).toarray()
-        if float(gamma) != 0.0:
-            scores += float(gamma) * normalized.toarray()
-        return self._normalize_scores(scores)
-
-    def S_TurboCF(self, alpha=0.5, power=1.0, filter=1, cache=None):
-        """TurboCF sparse polynomial item-graph filtering adapter."""
-        rows = np.asarray(self.R.sum(axis=1)).ravel()
-        cols = np.asarray(self.R.sum(axis=0)).ravel()
-        row_scale = np.power(rows + 1e-12, -float(alpha))
-        col_scale = np.power(cols + 1e-12, float(alpha) - 1.0)
-        normalized = sp.diags(row_scale).dot(self.R).dot(sp.diags(col_scale)).tocsr()
-        item_graph = normalized.T.dot(normalized).tocsr()
-        if item_graph.nnz:
-            item_graph.data = np.where(
-                item_graph.data > 1e-6,
-                np.power(item_graph.data, float(power)),
-                0.0,
-            )
-            item_graph.eliminate_zeros()
-        if int(filter) == 1:
-            filtered = item_graph
-        elif int(filter) == 2:
-            filtered = 2.0 * item_graph - item_graph.dot(item_graph)
-        elif int(filter) == 3:
-            p2 = item_graph.dot(item_graph)
-            p3 = p2.dot(item_graph)
-            filtered = item_graph + 0.01 * (-p3 + 10.0 * p2 - 29.0 * item_graph)
-        else:
-            raise ValueError("TurboCF filter must be 1, 2, or 3")
-        return self._normalize_scores(self.R.dot(filtered).toarray())
 
     def _threshold_offdiag_graph(self, matrix):
         graph = matrix.tocsr(copy=True)
@@ -432,195 +289,21 @@ class TFmodel:
                         + (maximum * float(beta_1) - float(beta_2) * minimum)
                         / (maximum - minimum))
         return value.unsqueeze(0).pow(exponent.unsqueeze(1))
+        
 
-    def fit_dan(self, interactions=None, model="RLAE_DAN", reg_p=20.0,
-                alpha=0.0, beta=0.0, drop_p=0.6, xi=0.1,
-                alpha_i=None, lambda_i=None,
-                alpha_u=None, lambda_u=None):
-        """Fit DAN using the SGFCF-style user/item normalization.
-
-        When all four normalization arguments are supplied, the input is
-        transformed as ``D_U @ R @ D_I`` where
-        ``D_U=(d_U+lambda_u)^(-alpha_u)`` and
-        ``D_I=(d_I+lambda_i)^(-alpha_i)``.  Leaving them unset preserves the
-        previous behavior and fits DAN on the supplied interaction matrix.
-        """
-        if model not in {"LAE_DAN", "EASE_DAN", "RLAE_DAN"}:
-            raise ValueError(f"Unknown DAN model: {model}")
-        X = (self.R if interactions is None else interactions).astype(np.float64).tocsr()
-        if all(value is not None for value in
-               (alpha_i, lambda_i, alpha_u, lambda_u)):
-            user_degree = np.asarray(X.sum(axis=1)).ravel()
-            item_degree = np.asarray(X.sum(axis=0)).ravel()
-            with np.errstate(divide="ignore", invalid="ignore"):
-                user_scale = np.power(
-                    user_degree + float(lambda_u), -float(alpha_u)
-                )
-                item_scale = np.power(
-                    item_degree + float(lambda_i), -float(alpha_i)
-                )
-            user_scale[~np.isfinite(user_scale)] = 0.0
-            item_scale[~np.isfinite(item_scale)] = 0.0
-            X = sp.diags(user_scale).dot(X).dot(sp.diags(item_scale)).tocsr()
-        item_counts = np.asarray(X.sum(axis=0)).ravel()
-        user_counts = np.asarray(X.sum(axis=1)).ravel()
-        safe_users = np.maximum(user_counts, 1.0)
-        regularization = float(reg_p) + float(drop_p) / (1.0 - float(drop_p)) * item_counts
-        gram = X.multiply(np.power(safe_users, -float(beta))[:, None]).T.dot(X).toarray()
-        diagonal = np.diag_indices(gram.shape[0])
-        gram[diagonal] += regularization
-        precision = np.linalg.inv(gram)
-        diag_precision = np.diag(precision)
-        if model == "EASE_DAN":
-            base = np.eye(len(diag_precision)) - precision / diag_precision
-        elif model == "LAE_DAN":
-            base = np.eye(len(diag_precision)) - precision * regularization
-        else:
-            condition = (1.0 - regularization * diag_precision) > float(xi)
-            lagrangian = ((1.0 - float(xi)) / diag_precision - regularization) * condition
-            base = np.eye(len(diag_precision)) - precision * (regularization + lagrangian)
-        safe_items = np.maximum(item_counts, 1.0)
-        weights = base * np.power(safe_items, float(alpha)).reshape(-1, 1)
-        weights *= np.power(safe_items, -float(alpha))
-        weights[diagonal] = 0.0
-        return {"model": model, "weights": weights, "interactions": X,
-                "cold_items": item_counts == 0,
-                "params": {"reg_p": float(reg_p), "alpha": float(alpha),
-                           "beta": float(beta), "drop_p": float(drop_p), "xi": float(xi)}}
-
-
-
-    def build_combined_X(self, beta_1=1.0, beta_2=1.0, gamma=1.0,
-                         dan_coefficient=1.0, dan_params=None,
-                         alpha_i=0.2, lambda_i=1.0,
-                         alpha_u=0.2, lambda_u=1.0, cache=None,
-                         return_components=False):
-        """Build a dense user-item score matrix for SGFCF+DAN testing.
-
-        The SGFCF graph-filter scores and DAN autoencoder scores are computed
-        with this class's component methods, normalized row-wise, combined,
-        and passed through a sigmoid.  The returned ``X`` has shape
-        ``(n_users, m_items)`` and can be used directly with
-        :meth:`Test_RatingMatrix`.
-        """
-        # SGFCF graph filtering on the normalized bipartite adjacency.
-        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
-        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
-        with np.errstate(divide="ignore", invalid="ignore"):
-            user_scale = np.power(user_degree + float(lambda_u), -float(alpha_u))
-            item_scale = np.power(item_degree + float(lambda_i), -float(alpha_i))
-        user_scale[~np.isfinite(user_scale)] = 0.0
-        item_scale[~np.isfinite(item_scale)] = 0.0
-        norm_cache = None if cache is None else cache.setdefault("normalized", {})
-        norm_key = (float(alpha_i), float(lambda_i), float(alpha_u), float(lambda_u))
-        if norm_cache is not None and norm_key in norm_cache:
-            normalized_interaction, normalized_adj = norm_cache[norm_key]
-        else:
-            normalized_interaction = sp.diags(user_scale).dot(
-                self.R
-            ).dot(sp.diags(item_scale)).tocsr()
-            normalized_adj = sp.bmat([
-                [None, normalized_interaction],
-                [normalized_interaction.T, None],
-            ], format="csr")
-            if norm_cache is not None:
-                max_entries = cache.get("max_normalized_entries", 1)
-                while len(norm_cache) >= int(max_entries):
-                    norm_cache.pop(next(iter(norm_cache)))
-                norm_cache[norm_key] = (normalized_interaction, normalized_adj)
-        # Eigenspaces depend only on normalization parameters and k, not on
-        # beta, gamma, DAN parameters, or the mixing coefficient.  Reuse them
-        # across candidates when a cache is supplied by the caller.
-        eig_cache = None if cache is None else cache.setdefault("eigen", {})
-        eig_key = (int(self.k), float(alpha_i), float(lambda_i),
-                   float(alpha_u), float(lambda_u))
-        if eig_cache is not None and eig_key in eig_cache:
-            eigenvectors, eigenvalues = eig_cache[eig_key]
-        else:
-            eigenvectors, eigenvalues = self.Eigendecomposition(normalized_adj)
-            if eig_cache is not None:
-                max_entries = cache.get("max_eigen_entries")
-                if max_entries is not None and max_entries > 0:
-                    while len(eig_cache) >= int(max_entries):
-                        eig_cache.pop(next(iter(eig_cache)))
-                eig_cache[eig_key] = (eigenvectors, eigenvalues)
-        user_homophily, item_homophily = self.compute_homophily()
-        homophily = torch.cat((user_homophily.to(self.device),
-                               item_homophily.to(self.device)))
-        response = self.individual_weight(
-            torch.clamp(torch.abs(eigenvalues), min=1e-12),
-            homophily,
-            beta_1=beta_1,
-            beta_2=beta_2,
-        )
-        filtered = eigenvectors * response
-        graph_scores = filtered[:self.n_users] @ filtered[self.n_users:].t()
-        graph_sum = graph_scores.sum(dim=1, keepdim=True)
-        graph_sum[graph_sum == 0] = 1.0
-        graph_scores = graph_scores / graph_sum
-        # The convolution term is controlled by ``gamma``.  Avoid building
-        # the large dense user-item convolution when its coefficient is zero.
-        gamma_value = float(gamma)
-        convolution = None
-        if gamma_value != 0.0:
-            normalized_interactions = normalized_adj[:self.n_users, self.n_users:]
-            convolution = normalized_interactions.dot(
-                normalized_interactions.T
-            ).dot(normalized_interactions).toarray()
-            convolution = torch.as_tensor(convolution, dtype=torch.float32,
-                                           device=self.device)
-            convolution_sum = convolution.sum(dim=1, keepdim=True)
-            convolution_sum[convolution_sum == 0] = 1.0
-            convolution = convolution / convolution_sum
-
-        # DAN autoencoder scores from the same training interaction matrix.
-        dan_options = dict(dan_params or {})
-        dan_alpha = float(dan_options.pop("alpha", 0.0))
-        dan_beta = float(dan_options.pop("beta", 0.0))
-        dan_cache = None if cache is None else cache.setdefault("dan", {})
-        dan_key = (float(alpha_i), float(lambda_i), float(alpha_u),
-                   float(lambda_u), tuple(sorted(dan_options.items())))
-        if dan_cache is not None and dan_key in dan_cache:
-            dan_state = dan_cache[dan_key]
-        else:
-            dan_state = self.fit_dan(
-                interactions=self.R,
-                alpha=dan_alpha,
-                beta=dan_beta,
-                alpha_i=alpha_i,
-                lambda_i=lambda_i,
-                alpha_u=alpha_u,
-                lambda_u=lambda_u,
-                **dan_options,
-            )
-            if dan_cache is not None:
-                max_entries = cache.get("max_dan_entries", 1)
-                while len(dan_cache) >= int(max_entries):
-                    dan_cache.pop(next(iter(dan_cache)))
-                dan_cache[dan_key] = dan_state
-        # Score DAN with the same normalized interaction matrix used to fit
-        # the model, rather than reverting to the raw interaction matrix.
-        dan_scores = np.asarray(
-            normalized_interaction.dot(dan_state["weights"]), dtype=np.float32
-        )
-        dan_scores[:, dan_state["cold_items"]] = -np.inf
-        dan_scores = torch.as_tensor(dan_scores, dtype=torch.float32,
+    def _normalize_scores(self, scores):
+        """Convert a NumPy/SciPy score result to a safe row-normalized tensor."""
+        if not torch.is_tensor(scores):
+            scores = torch.as_tensor(np.asarray(scores), dtype=torch.float32,
                                      device=self.device)
-        finite_dan = torch.isfinite(dan_scores)
-        dan_for_sum = torch.where(finite_dan, dan_scores, torch.zeros_like(dan_scores))
-        dan_sum = dan_for_sum.sum(dim=1, keepdim=True)
-        dan_sum[dan_sum == 0] = 1.0
-        dan_for_sum = dan_for_sum / dan_sum
+        scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+        denominator = scores.sum(dim=1, keepdim=True)
+        denominator[denominator == 0] = 1.0
+        return scores / denominator
 
-        sgfcf_scores = graph_scores if convolution is None else (
-            graph_scores + gamma_value * convolution
-        )
-        if return_components:
-            return {"sgfcf": sgfcf_scores, "dan": dan_for_sum}
-        X = torch.sigmoid(sgfcf_scores + float(dan_coefficient) * dan_for_sum)
-        cold_items = np.asarray(self.R.sum(axis=0)).ravel() == 0
-        X[:, torch.as_tensor(cold_items, device=self.device)] = -(1 << 10)
-        return X
+
+
+
 
 
 
@@ -779,7 +462,7 @@ class TFmodel:
 
     def Test_RatingMatrix(self, X, dataset, users=None, items=None, multicore=0):
         u_batch_size = world.config['test_u_batch_size']
-        if isinstance(X, LinearScoreMatrix) or (torch.is_tensor(X) and X.device.type == "cpu"):
+        if hasattr(X, "get_rows") or (torch.is_tensor(X) and X.device.type == "cpu"):
             u_batch_size = min(u_batch_size, 256)
         testDict: dict = dataset.testDict
         max_K = max(world.topks)
@@ -820,7 +503,7 @@ class TFmodel:
                     groundTrue = [list(items_set.intersection(testDict[u])) for u in batch_users]
                 else:
                     groundTrue = [testDict[u] for u in batch_users]
-                if isinstance(X, LinearScoreMatrix):
+                if hasattr(X, "get_rows"):
                     rating = X.get_rows(batch_users, self.device)
                 else:
                     indices = torch.as_tensor(batch_users, dtype=torch.long, device=X.device)
