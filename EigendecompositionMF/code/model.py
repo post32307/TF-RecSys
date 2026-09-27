@@ -70,7 +70,49 @@ class LowRankEASEUScoreMatrix:
         denom[denom == 0] = 1e-9
         pred_batch = (pred_batch - z_batch[:, None] * X_batch) / denom
         
-        return torch.as_tensor(pred_batch, dtype=torch.float32, device=device)
+        return torch.sigmoid(torch.as_tensor(pred_batch, dtype=torch.float32, device=device))
+
+
+class OriginalSGFCFScoreMatrix:
+    """Original SGFCF scorer evaluated in user batches.
+
+    This is the same rectangular-SVD construction as
+    ``TrainingFreeRecSys/SGFCF/sgfcf.py``. Keeping factors and the normalized
+    interaction matrix on CPU prevents a full user-item score matrix from
+    occupying accelerator memory while preserving the original score formula.
+    """
+
+    observed_mask_value = -1000.0
+
+    def __init__(self, user_factor, item_factor, normalized, gamma):
+        self.user_factor = user_factor.detach().cpu()
+        self.item_factor = item_factor.detach().cpu()
+        self.normalized_csr = normalized.tocsr()
+        self.normalized_csc = normalized.tocsc()
+        self.gamma = float(gamma)
+        self.shape = (self.user_factor.shape[0], self.item_factor.shape[0])
+
+    def get_rows(self, users, device):
+        index = torch.as_tensor(users, dtype=torch.long)
+        user_factor = self.user_factor[index].to(device)
+        item_factor = self.item_factor.to(device)
+        rate = user_factor.matmul(item_factor.t())
+        rate_sum = rate.sum(dim=1, keepdim=True)
+        rate_sum[rate_sum == 0] = 1.0
+        rate = rate / rate_sum
+        del user_factor, item_factor, rate_sum
+
+        if self.gamma != 0.0:
+            # Reference sgfcf.py: R_tilde R_tilde^T R_tilde, normalized per
+            # user, before it is multiplied by gamma and added to the score.
+            batch = self.normalized_csr[users]
+            conv = batch.dot(self.normalized_csc.T).dot(self.normalized_csr).toarray()
+            conv = torch.as_tensor(conv, dtype=torch.float32, device=device)
+            conv_sum = conv.sum(dim=1, keepdim=True)
+            conv_sum[conv_sum == 0] = 1.0
+            rate = rate + self.gamma * (conv / conv_sum)
+            del conv, conv_sum
+        return torch.sigmoid(rate)
 
 
 class Ensemble3WayScoreMatrix:
@@ -133,92 +175,96 @@ class TFmodel:
         B_I[diagIndices] = 0
 
         pred = X.dot(B_I)
-        return torch.as_tensor(pred, dtype=torch.float32, device=self.device)
+        return torch.sigmoid(torch.as_tensor(pred, dtype=torch.float32, device=self.device))
 
     def S_EASE_U(self, lambda_=50.0, cache=None):
         return LowRankEASEUScoreMatrix(self.R, k=self.k, lambda_=lambda_)
 
     def S_SGFCF(self, beta_1=1.0, beta_2=1.0, alpha=0.0,
-                eps=0.5, gamma=1.0, k=None, cache=None):
-        """Return the SGFCF user-item scoring matrix."""
+                eps=0.5, gamma=1.0, k=None, cache=None,
+                implementation_version=2):
+        """Return the original rectangular-SVD SGFCF scoring component."""
+        if int(implementation_version) != 2:
+            raise ValueError("SGFCF parameters must be revalidated for implementation 2.")
         if k is not None:
             self.k = int(k)
         degrees_u = np.asarray(self.R.sum(axis=1)).ravel()
         degrees_i = np.asarray(self.R.sum(axis=0)).ravel()
-        # Zero-degree users/items can occur after the train/validation split.
-        # In particular, alpha=0 with eps>0 would otherwise evaluate
-        # 0**(-eps) and inject inf values into the normalized matrix.
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             user_scale = np.power(degrees_u + float(alpha), -float(eps))
             item_scale = np.power(degrees_i + float(alpha), -float(eps))
         user_scale[~np.isfinite(user_scale)] = 0.0
         item_scale[~np.isfinite(item_scale)] = 0.0
-        norm_cache = None if cache is None else cache.setdefault("normalized", {})
-        # Validation and test loaders may infer slightly different dimensions
-        # when an ID appears only in one split.  Namespace cache entries by
-        # model instance so matrices with different shapes are never reused.
+
         model_key = id(self)
         norm_key = (model_key, float(alpha), float(eps))
+        norm_cache = None if cache is None else cache.setdefault("sgfcf_normalized", {})
         if norm_cache is not None and norm_key in norm_cache:
-            normalized, adjacency = norm_cache[norm_key]
+            normalized = norm_cache[norm_key]
         else:
             normalized = sp.diags(user_scale).dot(self.R).dot(sp.diags(item_scale)).tocsr()
-            adjacency = sp.bmat([[None, normalized], [normalized.T, None]], format="csr")
             if norm_cache is not None:
                 limit = int(cache.get("max_normalized_entries", 1))
                 while len(norm_cache) >= limit:
                     norm_cache.pop(next(iter(norm_cache)))
-                norm_cache[norm_key] = (normalized, adjacency)
-        eigen_cache = None if cache is None else cache.setdefault("eigen", {})
-        key = (model_key, int(self.k), float(alpha), float(eps))
-        if eigen_cache is not None and key in eigen_cache:
-            vectors_cpu, values_cpu = eigen_cache[key]
-            vectors = vectors_cpu.to(self.device)
-            values = values_cpu.to(self.device)
+                norm_cache[norm_key] = normalized
+
+        # Original sgfcf.py computes k+200 singular vectors, sorts them, and
+        # uses the leading k components in its graph-filter score.
+        svd_rank = min(int(self.k) + 200, min(normalized.shape) - 1)
+        if svd_rank < 1:
+            raise ValueError("SGFCF requires at least two users and two items.")
+        svd_key = (model_key, svd_rank, float(alpha), float(eps))
+        svd_cache = None if cache is None else cache.setdefault("sgfcf_svd", {})
+        if svd_cache is not None and svd_key in svd_cache:
+            u_cpu, s_cpu, v_cpu = svd_cache[svd_key]
         else:
-            vectors, values = self.Eigendecomposition(adjacency)
-            if eigen_cache is not None:
-                limit = int(cache.get("max_eigen_entries", 1))
-                while len(eigen_cache) >= limit:
-                    eigen_cache.pop(next(iter(eigen_cache)))
-                # Keep the reusable eigenspace in host memory.  Only this
-                # candidate's copy is moved to the accelerator below.
-                eigen_cache[key] = (vectors.detach().cpu(), values.detach().cpu())
-        hu_cpu, hi_cpu = self.compute_homophily()
-        hu = hu_cpu.to(self.device)
-        hi = hi_cpu.to(self.device)
-        response = self.individual_weight(torch.abs(values).clamp_min(1e-12),
-                                           torch.cat((hu, hi)), beta_1, beta_2)
-        weighted = vectors * response
-        scores = weighted[:self.n_users] @ weighted[self.n_users:].t()
-        # The eigenspace may remain in the cache, but these intermediate GPU
-        # tensors are no longer needed after the graph score is formed.
-        del weighted, response
-        denominator = scores.sum(dim=1, keepdim=True)
-        denominator[denominator == 0] = 1.0
-        scores = scores / denominator
-        if float(gamma) != 0.0:
-            conv_cache = None if cache is None else cache.setdefault("convolution", {})
-            if conv_cache is not None and norm_key in conv_cache:
-                conv = conv_cache[norm_key].to(self.device)
+            if self.device.type == "cuda":
+                cells = normalized.shape[0] * normalized.shape[1]
+                if cells <= 60_000_000:
+                    dense = torch.as_tensor(normalized.toarray(), dtype=torch.float64,
+                                            device=self.device)
+                    u, s, vh = torch.linalg.svd(dense, full_matrices=False)
+                    u, s, v = u[:, :svd_rank], s[:svd_rank], vh[:svd_rank].t()
+                    del dense, vh
+                else:
+                    coo = normalized.tocoo()
+                    sparse = torch.sparse_coo_tensor(
+                        torch.as_tensor(np.vstack((coo.row, coo.col)), dtype=torch.long,
+                                        device=self.device),
+                        torch.as_tensor(coo.data, dtype=torch.float32, device=self.device),
+                        coo.shape, device=self.device).coalesce()
+                    u, s, v = torch.svd_lowrank(sparse, q=svd_rank, niter=30)
+                    del sparse
+                order = torch.argsort(s, descending=True)
+                u_cpu = u[:, order].float().cpu()
+                s_cpu = s[order].float().cpu()
+                v_cpu = v[:, order].float().cpu()
+                del u, s, v, order
             else:
-                conv = normalized.dot(normalized.T).dot(normalized).toarray()
-                conv = torch.as_tensor(conv, dtype=torch.float32, device=self.device)
-                conv_denominator = conv.sum(dim=1, keepdim=True)
-                conv_denominator[conv_denominator == 0] = 1.0
-                conv = conv / conv_denominator
-                if conv_cache is not None:
-                    limit = int(cache.get("max_convolution_entries", 1))
-                    while len(conv_cache) >= limit:
-                        conv_cache.pop(next(iter(conv_cache)))
-                    conv_cache[norm_key] = conv.detach().cpu()
-            scores = scores + float(gamma) * conv
-            # Do not delete the cached tensor; only release the local alias.
-            if conv_cache is None:
-                del conv
-        if norm_cache is None:
-            del normalized, adjacency
-        return scores
+                u_np, s_np, vt_np = svds(normalized, k=svd_rank)
+                order = np.argsort(s_np)[::-1]
+                u_cpu = torch.as_tensor(u_np[:, order], dtype=torch.float32)
+                s_cpu = torch.as_tensor(s_np[order], dtype=torch.float32)
+                v_cpu = torch.as_tensor(vt_np[order, :].T, dtype=torch.float32)
+            if svd_cache is not None:
+                limit = int(cache.get("max_sgfcf_svd_entries", 1))
+                while len(svd_cache) >= limit:
+                    svd_cache.pop(next(iter(svd_cache)))
+                svd_cache[svd_key] = (u_cpu, s_cpu, v_cpu)
+
+        effective_k = min(int(self.k), s_cpu.numel())
+        if effective_k < 1:
+            raise ValueError("SGFCF did not obtain a usable singular component.")
+        values = (s_cpu[:effective_k] / s_cpu[0].clamp_min(1e-12)).to(self.device)
+        hu_cpu, hi_cpu = self.compute_homophily()
+        user_response = self.individual_weight(values, hu_cpu.to(self.device), beta_1, beta_2)
+        item_response = self.individual_weight(values, hi_cpu.to(self.device), beta_1, beta_2)
+        user_factor = u_cpu[:, :effective_k].to(self.device) * user_response
+        item_factor = v_cpu[:, :effective_k].to(self.device) * item_response
+        result = OriginalSGFCFScoreMatrix(user_factor, item_factor, normalized, gamma)
+        del values, user_response, item_response, user_factor, item_factor
+        return result
 
 
     def _threshold_offdiag_graph(self, matrix):
@@ -428,7 +474,7 @@ class TFmodel:
                 for range_i, items_pos in enumerate(allPos):
                     exclude_index.extend([range_i] * len(items_pos))
                     exclude_items.extend(items_pos)
-                rating[exclude_index, exclude_items] = -(1<<10)
+                rating[exclude_index, exclude_items] = getattr(X, "observed_mask_value", -(1<<10))
                 
                 
                 _, rating_K = torch.topk(rating, k=max_K)
@@ -513,7 +559,7 @@ class TFmodel:
                 for range_i, items_pos in enumerate(allPos):
                     exclude_index.extend([range_i] * len(items_pos))
                     exclude_items.extend(items_pos)
-                rating[exclude_index, exclude_items] = -(1<<10)
+                rating[exclude_index, exclude_items] = getattr(X, "observed_mask_value", -(1<<10))
                 
                 
                 _, rating_K = torch.topk(rating, k=max_K)

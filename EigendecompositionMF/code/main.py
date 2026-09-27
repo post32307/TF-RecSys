@@ -81,7 +81,7 @@ try:
         raise ValueError("fixed_k must be 0 or 1.")
 
     set_I = None
-    set_U = None
+    set_U = 0.0
     #   None None : search gamma_I and/or gamma_U
     #   0.x None : set gamma_I = 0.x and search gamma_U
     #   None 0.y : search gamma_I and set gamma_U=0.y
@@ -197,9 +197,18 @@ try:
                         if not all(p.get("implementation_version") == 2 for p in candidates):
                             world.cprint("Ignoring old ChebyCF parameters; the corrected model requires validation.")
                             continue
+                    elif model_key == "S_SGFCF":
+                        candidates = parameters if isinstance(parameters, list) else [parameters]
+                        if not all(p.get("implementation_version") == 2 for p in candidates):
+                            world.cprint("Ignoring old SGFCF parameters; the original SVD implementation requires validation.")
+                            continue
                     elif isinstance(parameters, dict) and "ChebyCF" in parameters:
                         if parameters["ChebyCF"].get("implementation_version") != 2:
                             world.cprint("Ignoring ensemble parameters fitted with the old ChebyCF implementation.")
+                            continue
+                    elif isinstance(parameters, dict) and "sgfcf_params" in parameters:
+                        if parameters["sgfcf_params"].get("implementation_version") != 2:
+                            world.cprint("Ignoring ensemble parameters fitted with the old SGFCF implementation.")
                             continue
                     saved[model_key] = parameters
                 except (SyntaxError, ValueError):
@@ -229,12 +238,9 @@ try:
     if fixed_k == 1:
         search_k_values = [int(input_k)]
     else:
-        # search_k_values = [
-        #     value for value in (16, 32, 64, 128, 256, 512, 1024)
-        #     if value < spectral_dimension
-        # ]
+        # Original SGFCF rank grid from TrainingFreeRecSys/run_sweep.py.
         search_k_values = [
-            value for value in (32, 128, 512)
+            value for value in (32, 64, 128, 256, 512, 1024)
             if value < spectral_dimension
         ]
         if not search_k_values:
@@ -298,17 +304,38 @@ try:
             )
         raise ValueError(f"Unknown model: {model_name}")
 
+    # Exact SGFCF sweep grid from TrainingFreeRecSys/run_sweep.py. These
+    # curated configurations include alpha=19.0, which the old local grid
+    # omitted and which produced the published amazon-electronics result.
+    ORIGINAL_SGFCF_BASE_COMBOS = (
+        {"beta_1": 1.0, "beta_2": 1.0, "alpha": 0.0, "eps": 0.5, "gamma": 1.0},
+        {"beta_1": 0.7, "beta_2": 1.1, "alpha": 0.0, "eps": 0.28, "gamma": 1.5},
+        {"beta_1": 4.3, "beta_2": 5.1, "alpha": 2.3, "eps": 0.5, "gamma": 0.05},
+        {"beta_1": 0.9, "beta_2": 1.0, "alpha": 0.0, "eps": 0.37, "gamma": 0.3},
+        {"beta_1": 2.0, "beta_2": 2.4, "alpha": 0.0, "eps": 0.37, "gamma": 0.07},
+        {"beta_1": 1.0, "beta_2": 1.3, "alpha": 19.0, "eps": 0.5, "gamma": 0.5},
+        {"beta_1": 2.0, "beta_2": 5.0, "alpha": 5.3, "eps": 0.5, "gamma": 0.025},
+        {"beta_1": 0.3, "beta_2": 2.5, "alpha": 0.0, "eps": 0.34, "gamma": 1.6},
+        {"beta_1": 2.5, "beta_2": 6.5, "alpha": 4.8, "eps": 0.5, "gamma": 0.025},
+    )
+
+    def original_sgfcf_parameter_space():
+        return [
+            {**base, "k": int(k), "implementation_version": 2}
+            for base in ORIGINAL_SGFCF_BASE_COMBOS
+            for k in search_k_values
+        ]
+
     def default_model_parameters(model_name):
         if model_name in ["S_EASE_I", "S_EASE_U"]:
             return {"lambda_": 500.0}
         elif model_name == "S_SGFCF":
-            return {"beta_1": 1.0, "beta_2": 1.0, "alpha": 0.0,
-                    "eps": 0.5, "gamma": 1.0, "k": int(search_k_values[0])}
+            return dict(original_sgfcf_parameter_space()[0])
         elif model_name == "IGF_EASE":
             return {"beta_1": 1.0, "beta_2": 1.1, "alpha": 1.0,
                     "eps": 0.5, "lambda_": 50.0, "gamma": 1.0, "k": int(search_k_values[0])}
         elif model_name == "Ensemble_3Way":
-            def_sgfcf = {"beta_1": 1.0, "beta_2": 1.0, "alpha": 0.0, "eps": 0.5, "gamma": 1.0, "k": int(search_k_values[0])}
+            def_sgfcf = dict(original_sgfcf_parameter_space()[0])
             def_ease = {"lambda_": 500.0}
             sgfcf_p = saved_parameters.get("S_SGFCF", def_sgfcf)
             if isinstance(sgfcf_p, list): sgfcf_p = sgfcf_p[0]
@@ -329,11 +356,7 @@ try:
         if model_name in ["S_EASE_I", "S_EASE_U"]:
             return [{"lambda_": l} for l in (50.0, 100.0, 200.0, 500.0, 1000.0)]
         elif model_name == "S_SGFCF":
-            return [dict(beta_1=b1, beta_2=b2, alpha=alpha, eps=eps, gamma=gamma, k=k)
-                    for alpha in (0.0, 1.0, 20.0)
-                    for eps in (0.1, 0.3, 0.5)
-                    for k in search_k_values
-                    for b1, b2, gamma in product((0.8, 1.0), (1.1, 1.3), (0.1, 0.5, 1.0))]
+            return original_sgfcf_parameter_space()
         elif model_name == "IGF_EASE":
             return [dict(beta_1=b1, beta_2=b2, alpha=alpha, eps=eps,
                          lambda_=lambda_, gamma=gamma, k=k)
@@ -344,20 +367,18 @@ try:
                     for b1, b2, gamma in product((0.8, 1.0), (1.1, 1.3),
                                                    (0.1, 0.5, 1.0))]
         elif model_name == "Ensemble_3Way":
-            sgfcf_space = [dict(beta_1=b1, beta_2=b2, alpha=alpha, eps=eps, gamma=gamma, k=k)
-                           for alpha in (0.0, 1.0, 20.0)
-                           for eps in (0.1, 0.3, 0.5)
-                           for k in search_k_values
-                           for b1, b2, gamma in product((0.8, 1.0), (1.1, 1.3), (0.1, 0.5, 1.0))]
+            sgfcf_space = original_sgfcf_parameter_space()
             # ease_i_space = [{"lambda_": l} for l in (50.0, 100.0, 200.0, 500.0, 1000.0)]
             # ease_u_space = [{"lambda_": l} for l in (50.0, 100.0, 200.0, 500.0, 1000.0)]
             ease_i_space = [{"lambda_": l} for l in (50.0, 200.0, 1000.0)]
             ease_u_space = [{"lambda_": l} for l in (50.0, 200.0, 1000.0)]
             
             # gammas_i = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_I is None else [float(set_I)]
-            # gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
-            gammas_i = [0.0, 0.1, 0.5, 0.9, 1.0] if set_I is None else [float(set_I)]
-            gammas_u = [0.0, 0.1, 0.5, 0.9, 1.0] if set_U is None else [float(set_U)]
+            gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
+
+            gammas_i = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] if set_I is None else [float(set_I)]
+            # gammas_i = [0.0, 0.1, 0.5, 0.9, 1.0] if set_I is None else [float(set_I)]
+            # gammas_u = [0.0, 0.1, 0.5, 0.9, 1.0] if set_U is None else [float(set_U)]
 
             return [
                 {
