@@ -52,16 +52,26 @@ class LowRankEASEUScoreMatrix:
         self.D = Lambda / (Lambda + float(lambda_))
         self.U = U
         self.lambda_ = float(lambda_)
-        
-        self.z = np.sum((U ** 2) * self.D, axis=1)
+        self.response = np.broadcast_to(self.D, self.U.shape).copy()
+        self.z = np.sum((U ** 2) * self.response, axis=1)
         self.Ut_X = self.U.T @ self.X
+
+    def set_individual_response(self, response):
+        """Set a user-by-component IGF response after the SVD is fitted."""
+        response = np.asarray(response, dtype=self.U.dtype)
+        if response.shape != self.U.shape:
+            raise ValueError(
+                f"EASE-U response must have shape {self.U.shape}, got {response.shape}."
+            )
+        self.response = response
+        self.z = np.sum((self.U ** 2) * self.response, axis=1)
 
     def get_rows(self, users, device):
         import torch
         U_batch = self.U[users]
         z_batch = self.z[users]
         
-        U_D_batch = U_batch * self.D
+        U_D_batch = U_batch * self.response[users]
         pred_batch = U_D_batch @ self.Ut_X
         
         X_batch = self.X[users].toarray()
@@ -165,20 +175,88 @@ class TFmodel:
 
     # Model Functions
 
-    def S_EASE_I(self, lambda_=50.0, cache=None):
-        X = self.R
-        G_I = X.T.dot(X).toarray()
-        diagIndices = np.diag_indices(G_I.shape[0])
-        G_I[diagIndices] += lambda_
-        P_I = np.linalg.inv(G_I)
-        B_I = P_I / (-np.diag(P_I))
-        B_I[diagIndices] = 0
+    def S_EASE_I(self, lambda_=50.0, beta_1=0.9, beta_2=1.1, cache=None):
+        """Return item-EASE scores using an SVD ridge solve, not ``inv``.
 
-        pred = X.dot(B_I)
+        For ``X = U Σ Vᵀ``, the EASE precision matrix is
+        ``P = (XᵀX + λI)⁻¹``.  This implementation evaluates ``XP`` and
+        ``diag(P)`` directly from the singular values, then applies EASE's
+        zero-diagonal coefficient constraint without materialising ``P`` or
+        calling a dense matrix inverse.
+        """
+        regularization = float(lambda_)
+        if regularization <= 0.0:
+            raise ValueError("S_EASE_I requires lambda_ > 0 for the ridge SVD solve.")
+
+        model_key = id(self)
+        svd_cache = None if cache is None else cache.setdefault("ease_i_svd", {})
+        if svd_cache is not None and model_key in svd_cache:
+            singular_values, right_vectors = svd_cache[model_key]
+        else:
+            # Economy SVD is sufficient: the omitted right-singular subspace
+            # contributes the 1/lambda identity term below.
+            dense_interactions = self.R.toarray().astype(np.float64, copy=False)
+            _, singular_values, right_transpose = np.linalg.svd(
+                dense_interactions, full_matrices=False
+            )
+            right_vectors = right_transpose.T
+            del dense_interactions, right_transpose
+            if svd_cache is not None:
+                limit = int(cache.get("max_ease_i_svd_entries", 1))
+                while len(svd_cache) >= limit:
+                    svd_cache.pop(next(iter(svd_cache)))
+                svd_cache[model_key] = (singular_values, right_vectors)
+
+        inverse_lambda = 1.0 / regularization
+        spectral_correction = (
+            1.0 / (singular_values ** 2 + regularization) - inverse_lambda
+        )
+        # ``individual_weight`` is defined for non-negative filter responses.
+        # Apply it to the correction magnitude, restore the original (negative)
+        # ridge-correction sign, and obtain an item-by-component response.
+        _, item_homophily = self.compute_homophily()
+        correction_magnitude = torch.as_tensor(
+            np.abs(spectral_correction), dtype=torch.float64
+        )
+        adaptive_correction = self.individual_weight(
+            correction_magnitude, item_homophily, beta_1, beta_2
+        ).cpu().numpy()
+        adaptive_correction *= np.sign(spectral_correction)[None, :]
+
+        # The response is item-specific, so both diag(P) and XP use the same
+        # weighted V rows.  beta_1=beta_2=1 reproduces ordinary EASE-I.
+        precision_diagonal = inverse_lambda + np.sum(
+            (right_vectors ** 2) * adaptive_correction, axis=1
+        )
+        precision_diagonal = np.maximum(precision_diagonal, np.finfo(np.float64).eps)
+
+        # XP = X P = X/lambda + (X V) [V * adaptive_correction]^T.
+        XP = self.R.dot(right_vectors)
+        XP = XP.dot((right_vectors * adaptive_correction).T)
+        XP += self.R.toarray().astype(np.float64, copy=False) * inverse_lambda
+
+        # -XP / diag(P) corresponds to X[-P/diag(P)].  The latter has a -1
+        # diagonal, so adding X is exactly EASE's B_ii = 0 correction.
+        pred = self.R.toarray().astype(np.float64, copy=False) - XP / precision_diagonal[None, :]
         return torch.sigmoid(torch.as_tensor(pred, dtype=torch.float32, device=self.device))
 
-    def S_EASE_U(self, lambda_=50.0, cache=None):
-        return LowRankEASEUScoreMatrix(self.R, k=self.k, lambda_=lambda_)
+    def S_EASE_U(self, lambda_=50.0, beta_1=1.0, beta_2=1.0, cache=None):
+        # Keep EASE-U independent of SGFCF's searched/mutable rank.  scipy
+        # svds requires k < min(R.shape), hence the minus one cap.
+        ease_u_k = max(1, min(128, min(self.R.shape) - 1))
+        scorer = LowRankEASEUScoreMatrix(self.R, k=ease_u_k, lambda_=lambda_)
+
+        # EASE-U filters user-space singular components, so use the user
+        # homophily response (the EASE-I analogue uses item homophily).
+        user_homophily, _ = self.compute_homophily()
+        response = self.individual_weight(
+            torch.as_tensor(scorer.D, dtype=torch.float64),
+            user_homophily,
+            beta_1,
+            beta_2,
+        ).cpu().numpy()
+        scorer.set_individual_response(response)
+        return scorer
 
     def S_SGFCF(self, beta_1=1.0, beta_2=1.0, alpha=0.0,
                 eps=0.5, gamma=1.0, k=None, cache=None,

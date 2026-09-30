@@ -81,7 +81,7 @@ try:
         raise ValueError("fixed_k must be 0 or 1.")
 
     set_I = None
-    set_U = 0.0
+    set_U = None
     #   None None : search gamma_I and/or gamma_U
     #   0.x None : set gamma_I = 0.x and search gamma_U
     #   None 0.y : search gamma_I and set gamma_U=0.y
@@ -326,9 +326,28 @@ try:
             for k in search_k_values
         ]
 
+    # Shared EASE search spaces.  Both direct-model and ensemble validation
+    # paths use these definitions to prevent parameter-grid drift.  EASE-I
+    # and EASE-U both use these beta values for their IGF responses.
+    EASE_LAMBDA_SPACE = (50.0, 100.0, 200.0, 500.0, 1000.0)
+    EASE_I_BETA_1_SPACE = (0.8, 1.0)
+    EASE_I_BETA_2_SPACE = (1.0, 1.2)
+
+    def ease_parameter_space(model_name):
+        if model_name in ("S_EASE_I", "S_EASE_U"):
+            return [
+                {"lambda_": lambda_, "beta_1": beta_1, "beta_2": beta_2}
+                for lambda_ in EASE_LAMBDA_SPACE
+                for beta_1 in EASE_I_BETA_1_SPACE
+                for beta_2 in EASE_I_BETA_2_SPACE
+            ]
+        raise ValueError(f"EASE parameter space is not defined for {model_name}.")
+
     def default_model_parameters(model_name):
-        if model_name in ["S_EASE_I", "S_EASE_U"]:
-            return {"lambda_": 500.0}
+        if model_name == "S_EASE_I":
+            return {"lambda_": 500.0, "beta_1": 1.0, "beta_2": 1.0}
+        elif model_name == "S_EASE_U":
+            return {"lambda_": 500.0, "beta_1": 1.0, "beta_2": 1.0}
         elif model_name == "S_SGFCF":
             return dict(original_sgfcf_parameter_space()[0])
         elif model_name == "IGF_EASE":
@@ -353,8 +372,8 @@ try:
         raise ValueError(f"Unknown model: {model_name}")
 
     def model_parameter_space(model_name):
-        if model_name in ["S_EASE_I", "S_EASE_U"]:
-            return [{"lambda_": l} for l in (50.0, 100.0, 200.0, 500.0, 1000.0)]
+        if model_name in ("S_EASE_I", "S_EASE_U"):
+            return ease_parameter_space(model_name)
         elif model_name == "S_SGFCF":
             return original_sgfcf_parameter_space()
         elif model_name == "IGF_EASE":
@@ -368,17 +387,15 @@ try:
                                                    (0.1, 0.5, 1.0))]
         elif model_name == "Ensemble_3Way":
             sgfcf_space = original_sgfcf_parameter_space()
-            # ease_i_space = [{"lambda_": l} for l in (50.0, 100.0, 200.0, 500.0, 1000.0)]
-            # ease_u_space = [{"lambda_": l} for l in (50.0, 100.0, 200.0, 500.0, 1000.0)]
-            ease_i_space = [{"lambda_": l} for l in (50.0, 200.0, 1000.0)]
-            ease_u_space = [{"lambda_": l} for l in (50.0, 200.0, 1000.0)]
+            ease_i_space = ease_parameter_space("S_EASE_I")
+            ease_u_space = ease_parameter_space("S_EASE_U")
             
             # gammas_i = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_I is None else [float(set_I)]
-            gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
+            # gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
 
-            gammas_i = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] if set_I is None else [float(set_I)]
-            # gammas_i = [0.0, 0.1, 0.5, 0.9, 1.0] if set_I is None else [float(set_I)]
-            # gammas_u = [0.0, 0.1, 0.5, 0.9, 1.0] if set_U is None else [float(set_U)]
+            # gammas_i = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] if set_I is None else [float(set_I)]
+            gammas_i = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_I is None else [float(set_I)]
+            gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
 
             return [
                 {
@@ -395,46 +412,180 @@ try:
             ]
         raise ValueError(f"Unknown model: {model_name}")
 
-    best_score = -np.inf
-    best_params = default_model_parameters(world.input_model)
-    best_result = None
+    # ---------------------------------------------------------
+    # 3. Three-stage validation and ensemble search
+    # ---------------------------------------------------------
+    # The three-way model is deliberately selected entirely on val.txt:
+    # 1) retain the top 10 SGFCF and top 3 EASE-I/EASE-U settings, then 2)
+    # choose the best component triplet and valid gamma pair from them.
+    # test.txt is reached only once, after all validation decisions are fixed.
+    TOP_COMPONENT_PARAMS = 10
+    EASE_TOP_COMPONENT_PARAMS = 3
+    def gamma_parameter_pairs():
+        gamma_values = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
+        gamma_i_values = gamma_values if set_I is None else (float(set_I),)
+        gamma_u_values = gamma_values if set_U is None else (float(set_U),)
+        return [
+            (round(gamma_i, 2), round(gamma_u, 2))
+            for gamma_i in gamma_i_values
+            for gamma_u in gamma_u_values
+            if round(gamma_i + gamma_u, 2) <= 1.0
+        ]
 
-    if val_true:
-        candidates = model_parameter_space(world.input_model)
+    def clear_cuda_cache():
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    def search_top_parameters(model_name, candidates, keep_top=TOP_COMPONENT_PARAMS):
+        """Evaluate every candidate on val.txt and return its top settings."""
+        ranked = []
+        best_score = -np.inf
+        best_params = None
+        best_result = None
         for index, params in enumerate(candidates, 1):
-            scores = score_model(search_model, world.input_model, params, cache)
+            scores = score_model(search_model, model_name, params, cache)
             result = metric(scores, search_model, search_dataset)
             score = float(result["recall"][0])
+            # The index makes ties deterministic: earlier grid entries win.
+            ranked.append((score, index, dict(params), result))
             if score > best_score:
-                best_score = score
-                best_params = params
-                best_result = result
+                best_score, best_params, best_result = score, dict(params), result
             del scores
+            clear_cuda_cache()
             if index % 10 == 0 or index == len(candidates):
-                print(f"\033[0;30;43m{world.input_model} search {index}/{len(candidates)}: best Recall@20={best_score:.6f}\033[0m", end=" ")
+                print(f"\033[0;30;43m{model_name} validation {index}/{len(candidates)}: "
+                      f"best Recall@20={best_score:.6f}\033[0m", end=" ")
                 print(f"| best_params={best_params}")
-        save_best_parameters(world.input_model, best_params)
-    elif saved_model:
-        best_params = saved_model[0] if isinstance(saved_model, list) else saved_model
+        ranked.sort(key=lambda entry: (-entry[0], entry[1]))
+        return [entry[2] for entry in ranked[:min(keep_top, len(ranked))]], best_result
 
-    # ---------------------------------------------------------
-    # 3. Final test of the model
-    # ---------------------------------------------------------
-    test_scores = score_model(Recmodel, world.input_model, best_params, cache)
-    test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
-    if val_true or saved_model is not None:
-        save_best_parameters(world.input_model, best_params, test_results=test_result)
-        
-    world.cprint("=== Validation / search results ===")
-    world.cprint(f"{world.input_model} validation: {best_result}")
-    world.cprint("=== Final test results ===")
-    print(f"\033[0;30;43m{world.input_model} test: {test_result}\033[0m", end=" ")
-    print(f"| params: {best_params}")
-    
-    del test_scores
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    def cpu_component_scores(model_name, parameters):
+        """Construct a validation component once and keep GPU memory free."""
+        scores = score_model(search_model, model_name, parameters, cache)
+        if torch.is_tensor(scores):
+            scores = scores.detach().cpu()
+        clear_cuda_cache()
+        return scores
+
+    if world.input_model == "Ensemble_3Way" and val_true == 1:
+        # Stage 1: each independent component is searched exclusively on val.txt.
+        top_sgfcf, sgfcf_validation = search_top_parameters(
+            "S_SGFCF", original_sgfcf_parameter_space())
+        top_ease_i, ease_i_validation = search_top_parameters(
+            "S_EASE_I", ease_parameter_space("S_EASE_I"), EASE_TOP_COMPONENT_PARAMS)
+        top_ease_u, ease_u_validation = search_top_parameters(
+            "S_EASE_U", ease_parameter_space("S_EASE_U"), EASE_TOP_COMPONENT_PARAMS)
+        save_best_parameters("S_SGFCF", top_sgfcf)
+        save_best_parameters("S_EASE_I", top_ease_i)
+        save_best_parameters("S_EASE_U", top_ease_u)
+
+        # Stage 2: evaluate every retained component triplet and gamma pair on
+        # val.txt.  SGFCF and EASE-U are CPU-resident reusable score objects;
+        # EASE-I is retained one setting at a time to bound peak memory.
+        validation_sgfcf = {
+            repr(params): cpu_component_scores("S_SGFCF", params)
+            for params in top_sgfcf
+        }
+        validation_ease_u = {
+            repr(params): cpu_component_scores("S_EASE_U", params)
+            for params in top_ease_u
+        }
+        gamma_pairs = gamma_parameter_pairs()
+        total = len(top_sgfcf) * len(top_ease_i) * len(top_ease_u) * len(gamma_pairs)
+        best_score = -np.inf
+        best_params = None
+        best_result = None
+        search_index = 0
+
+        for ease_i_params in top_ease_i:
+            ease_i_scores = cpu_component_scores("S_EASE_I", ease_i_params)
+            for ease_u_params in top_ease_u:
+                ease_u_scores = validation_ease_u[repr(ease_u_params)]
+                for sgfcf_params in top_sgfcf:
+                    sgfcf_scores = validation_sgfcf[repr(sgfcf_params)]
+                    for gamma_i, gamma_u in gamma_pairs:
+                        search_index += 1
+                        scores = model.Ensemble3WayScoreMatrix(
+                            sgfcf_scores, ease_i_scores, ease_u_scores,
+                            gamma_i, gamma_u)
+                        result = metric(scores, search_model, search_dataset)
+                        score = float(result["recall"][0])
+                        if score > best_score:
+                            best_score = score
+                            best_params = {
+                                "sgfcf_params": dict(sgfcf_params),
+                                "ease_i_params": dict(ease_i_params),
+                                "ease_u_params": dict(ease_u_params),
+                                "gamma_i": gamma_i,
+                                "gamma_u": gamma_u,
+                            }
+                            best_result = result
+                        del scores
+                        if search_index % 100 == 0 or search_index == total:
+                            print(f"\033[0;30;43mEnsemble_3Way validation "
+                                  f"{search_index}/{total}: best Recall@20="
+                                  f"{best_score:.6f}\033[0m", end=" ")
+                            print(f"| best_params={best_params}")
+            del ease_i_scores
+            clear_cuda_cache()
+
+        # Stage 3: construct the selected scoring matrices on the test loader
+        # and evaluate them once against test.txt.
+        test_scores = score_model(Recmodel, "Ensemble_3Way", best_params, cache)
+        test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
+        save_best_parameters("Ensemble_3Way", best_params, test_results=test_result)
+
+        world.cprint(f"=== Dataset: {dataset_name} ===")
+        world.cprint("=== Validation / search results ===")
+        world.cprint(f"SGFCF top-{TOP_COMPONENT_PARAMS} validation best: {sgfcf_validation}")
+        world.cprint(f"EASE_I top-{EASE_TOP_COMPONENT_PARAMS} validation best: {ease_i_validation}")
+        world.cprint(f"EASE_U top-{EASE_TOP_COMPONENT_PARAMS} validation best: {ease_u_validation}")
+        world.cprint(f"Ensemble_3Way validation: {best_result}")
+        world.cprint("=== Final test results ===")
+        print(f"\033[0;30;43mEnsemble_3Way test: {test_result}\033[0m", end=" ")
+        print(f"| params: {best_params}")
+
+        del test_scores, validation_sgfcf, validation_ease_u
+        clear_cuda_cache()
+    else:
+        # Preserve direct single-model validation/test behavior.
+        best_score = -np.inf
+        best_params = default_model_parameters(world.input_model)
+        best_result = None
+
+        if val_true:
+            candidates = model_parameter_space(world.input_model)
+            for index, params in enumerate(candidates, 1):
+                scores = score_model(search_model, world.input_model, params, cache)
+                result = metric(scores, search_model, search_dataset)
+                score = float(result["recall"][0])
+                if score > best_score:
+                    best_score = score
+                    best_params = params
+                    best_result = result
+                del scores
+                if index % 10 == 0 or index == len(candidates):
+                    print(f"\033[0;30;43m{world.input_model} search {index}/{len(candidates)}: best Recall@20={best_score:.6f}\033[0m", end=" ")
+                    print(f"| best_params={best_params}")
+            save_best_parameters(world.input_model, best_params)
+        elif saved_model:
+            best_params = saved_model[0] if isinstance(saved_model, list) else saved_model
+
+        test_scores = score_model(Recmodel, world.input_model, best_params, cache)
+        test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
+        if val_true or saved_model is not None:
+            save_best_parameters(world.input_model, best_params, test_results=test_result)
+
+        world.cprint(f"=== Dataset: {dataset_name} ===")
+        world.cprint("=== Validation / search results ===")
+        world.cprint(f"{world.input_model} validation: {best_result}")
+        world.cprint("=== Final test results ===")
+        print(f"\033[0;30;43m{world.input_model} test: {test_result}\033[0m", end=" ")
+        print(f"| params: {best_params}")
+
+        del test_scores
+        clear_cuda_cache()
     
 
 
