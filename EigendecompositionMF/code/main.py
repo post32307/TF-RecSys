@@ -2,12 +2,10 @@ import world
 import torch
 torch.set_num_threads(4)
 import os
-import sys
 import time
 import gc
 import fcntl
 import ast
-from itertools import product
 import numpy as np
 from tensorboardX import SummaryWriter
 from os.path import join
@@ -16,34 +14,6 @@ import helpers
 helpers.set_seed(world.seed)
 print(">>SEED:", world.seed)
 # ==============================
-
-sources_path = os.path.join(os.path.dirname(__file__), "sources")
-if sources_path not in sys.path:
-    sys.path.append(sources_path)
-sample_ext = False
-try:
-    from cppimport import imp_from_filepath
-    from os.path import join, dirname
-    path = join(dirname(__file__), "sources/sampling.cpp")
-    sampling = imp_from_filepath(path)
-
-    sampling.seed(world.seed)
-    sample_ext = True
-    world.cprint("Success: Pre-compiled C++ extension loaded (.so)")
-except ImportError:
-    try:
-        from cppimport import imp_from_filepath
-        path = os.path.join(sources_path, "sampling.cpp")
-        sampling = imp_from_filepath(path)
-        sampling.seed(world.seed)
-        sample_ext = True
-        world.cprint("Loaded via cppimport (compiled on the fly)")
-    except Exception as e:
-        world.cprint(f"Cpp extension not loaded: {e}")
-        sample_ext = False
-
-Neg_k = 1
-
 
 def load_dataset_split(loader_class, dataset_path, eval_file):
     """Load train.txt while selecting the validation or test target file."""
@@ -68,24 +38,30 @@ else:
 
 try:
     
-    val_true = 1
-    #   0: no hyperparameter search; test default params on test.txt
-    #   1: train on train.txt, search on val.txt, test on test.txt
-    if val_true not in (0, 1):
-        raise ValueError("val_true must be 0 or 1.")
-
     fixed_k = 0
-    #   0: search over values of k
-    #   1: use the --k argument
+    #   0: search the SGFCF rank grid
+    #   1: use the --k argument for SGFCF
+    # EASE-I has no rank and EASE-U keeps its fixed rank of 128 (dimension-capped).
     if fixed_k not in (0, 1):
         raise ValueError("fixed_k must be 0 or 1.")
 
     set_I = None
     set_U = None
-    #   None None : search gamma_I and/or gamma_U
-    #   0.x None : set gamma_I = 0.x and search gamma_U
-    #   None 0.y : search gamma_I and set gamma_U=0.y
-    #   0.x 0.y : set gamma_I = 0.x and gamma_U = 0.y
+    #   None None : search gamma_I and gamma_U
+    #   0.x None : fix gamma_I and search gamma_U
+    #   None 0.y : search gamma_I and fix gamma_U
+    #   0.x 0.y : fix both gamma values
+    for name, value in (("set_I", set_I), ("set_U", set_U)):
+        if value is not None and not 0.0 <= float(value) <= 1.0:
+            raise ValueError(f"{name} must be None or lie in [0, 1].")
+    if set_I is not None and set_U is not None and float(set_I) + float(set_U) > 1.0:
+        raise ValueError("set_I + set_U must not exceed 1.0.")
+
+    ACTIVE_MODELS = {"SGFCF", "EASE_I", "EASE_U", "Ensemble_3Way"}
+    if world.input_model not in ACTIVE_MODELS:
+        raise ValueError(
+            f"input_model must be one of {sorted(ACTIVE_MODELS)}, got {world.input_model!r}."
+        )
 
 
     # ---------------------------------------------------------
@@ -118,10 +94,6 @@ try:
                     entries[(parts[0].strip(), parts[1].strip(), parts[2].strip())] = parts[3].strip()
                 elif len(parts) == 3:
                     entries[(parts[0].strip(), parts[1].strip(), parts[2].strip())] = None
-            # Migrate the old unqualified ensemble entry once a pair-specific
-            # key is written; otherwise it would remain as a stale duplicate.
-            if model_name.startswith("ensemble:"):
-                entries.pop((dataset_name, seed_name, "ensemble"), None)
             entries[key] = None if parameters is None else repr(parameters)
             if test_results is not None:
                 def format_metric(name):
@@ -136,26 +108,23 @@ try:
                     f" / Recall {format_metric('recall')}"
                     f" / NDCG {format_metric('ndcg')}"
                 )
-            model_order = {"SGFCF": 1, "DAN": 2, "ensemble": 3}
+            model_order = {"SGFCF": 1, "EASE_I": 2, "EASE_U": 3,
+                           "Ensemble_3Way": 4}
             seed_order = {"2020": 0, "2026": 1, "42": 2}
             ordered = sorted(
                 entries.items(),
-                key=lambda item: (item[0][0], seed_order.get(item[0][1], 99),
-                                  item[0][1],
-                                  (0 if item[0][2].startswith("Ensembling ")
-                                   else model_order.get(item[0][2], 99)),
-                                  item[0][2]),
+                key=lambda item: (
+                    item[0][0], seed_order.get(item[0][1], 99), item[0][1],
+                    model_order.get(item[0][2], 99), item[0][2],
+                ),
             )
             model_entries = [
                 item for item in ordered
-                if (item[0][2] != "ensemble" and
-                    not item[0][2].startswith("ensemble:") and
-                    not item[0][2].startswith("Ensembling "))
+                if item[0][2] != "Ensemble_3Way"
             ]
             ensemble_entries = [
                 item for item in ordered
-                if (item[0][2] == "ensemble" or
-                    item[0][2].startswith("ensemble:"))
+                if item[0][2] == "Ensemble_3Way"
             ]
             handle.seek(0)
             handle.truncate()
@@ -192,30 +161,21 @@ try:
                 try:
                     # Metric annotations are not part of the parameter dict.
                     parameters = ast.literal_eval(value.split(" : Precision ", 1)[0])
-                    if model_key == "ChebyCF":
+                    if model_key == "SGFCF":
                         candidates = parameters if isinstance(parameters, list) else [parameters]
                         if not all(p.get("implementation_version") == 2 for p in candidates):
-                            world.cprint("Ignoring old ChebyCF parameters; the corrected model requires validation.")
+                            world.cprint("Ignoring old SGFCF parameters; validation is required.")
                             continue
-                    elif model_key == "S_SGFCF":
-                        candidates = parameters if isinstance(parameters, list) else [parameters]
-                        if not all(p.get("implementation_version") == 2 for p in candidates):
-                            world.cprint("Ignoring old SGFCF parameters; the original SVD implementation requires validation.")
-                            continue
-                    elif isinstance(parameters, dict) and "ChebyCF" in parameters:
-                        if parameters["ChebyCF"].get("implementation_version") != 2:
-                            world.cprint("Ignoring ensemble parameters fitted with the old ChebyCF implementation.")
-                            continue
-                    elif isinstance(parameters, dict) and "sgfcf_params" in parameters:
+                    if isinstance(parameters, dict) and "sgfcf_params" in parameters:
                         if parameters["sgfcf_params"].get("implementation_version") != 2:
-                            world.cprint("Ignoring ensemble parameters fitted with the old SGFCF implementation.")
+                            world.cprint("Ignoring ensemble parameters fitted with old SGFCF parameters.")
                             continue
                     saved[model_key] = parameters
                 except (SyntaxError, ValueError):
                     world.cprint(f"Ignoring malformed saved parameters for {model_key}")
         return saved
     
-    if val_true == 1 and not os.path.isfile(os.path.join(dataset_path, "val.txt")):
+    if not os.path.isfile(os.path.join(dataset_path, "val.txt")):
         raise FileNotFoundError(f"Validation file not found: {os.path.join(dataset_path, 'val.txt')}")
 
     if not os.path.isdir(dataset_path):
@@ -226,7 +186,6 @@ try:
     world.cprint(f"Dataset root: {data_root}")
     world.cprint(f"Selected dataset: {dataset_name}")
     world.cprint(f"Dataset path: {dataset_path}")
-    world.cprint(f"val_true: {val_true}")
     world.cprint(f"input k: {input_k}")
 
     print()
@@ -236,6 +195,10 @@ try:
     Recmodel = model.TFmodel(world.config, dataset)
     spectral_dimension = min(Recmodel.R.shape)
     if fixed_k == 1:
+        if not 1 <= int(input_k) < spectral_dimension:
+            raise ValueError(
+                f"--k must be in [1, {spectral_dimension - 1}] for this dataset; got {input_k}."
+            )
         search_k_values = [int(input_k)]
     else:
         # Original SGFCF rank grid from TrainingFreeRecSys/run_sweep.py.
@@ -251,32 +214,31 @@ try:
 
 
     # ---------------------------------------------------------
-    # 2. Independent validation search for the chosen model
+    # 2. Validation data, caches, and active scorers
     # ---------------------------------------------------------
-    search_dataset = load_dataset_split(
-        dataloader.Loader, dataset_path, "val.txt"
-    ) if val_true == 1 else None
-    if val_true == 0:
-        search_dataset = dataset
+    # Every parameter decision is made on val.txt.  test.txt is reserved for
+    # the final selected model evaluation.
+    search_dataset = load_dataset_split(dataloader.Loader, dataset_path, "val.txt")
     search_model = model.TFmodel(world.config, search_dataset)
+
+    # Active scorers add their own cache entries; these limits govern the
+    # reusable SGFCF/EASE decompositions without retaining obsolete model data.
     cache = {
-        "eigen": {}, "max_eigen_entries": 1,
-        "normalized": {}, "max_normalized_entries": 1,
-        "convolution": {}, "max_convolution_entries": 1,
-        "dan": {}, "max_dan_entries": 1,
+        "max_normalized_entries": 1,
+        "max_sgfcf_svd_entries": 1,
+        "max_ease_i_svd_entries": 1,
     }
     saved_parameters = load_saved_parameters()
-    saved_model = saved_parameters.get(world.input_model)
     
     def metric(scores, evaluator, target):
         return evaluator.Test_RatingMatrix(scores, target)
 
     def score_model(recmodel, model_name, params, model_cache):
-        if model_name == "S_EASE_I":
+        if model_name == "EASE_I":
             return recmodel.S_EASE_I(cache=model_cache, **params)
-        elif model_name == "S_EASE_U":
+        elif model_name == "EASE_U":
             return recmodel.S_EASE_U(cache=model_cache, **params)
-        elif model_name == "S_SGFCF":
+        elif model_name == "SGFCF":
             return recmodel.S_SGFCF(cache=model_cache, **params)
         elif model_name == "Ensemble_3Way":
             sgfcf_key = f"sgfcf_{params['sgfcf_params']}"
@@ -334,110 +296,57 @@ try:
     EASE_I_BETA_2_SPACE = (1.0, 1.2)
 
     def ease_parameter_space(model_name):
-        if model_name in ("S_EASE_I", "S_EASE_U"):
+        if model_name in ("EASE_I", "EASE_U"):
             return [
-                {"lambda_": lambda_, "beta_1": beta_1, "beta_2": beta_2}
+                {
+                    "lambda_": lambda_,
+                    "beta_1": beta_1,
+                    "beta_2": beta_2,
+                    "implementation_version": 3,
+                }
                 for lambda_ in EASE_LAMBDA_SPACE
                 for beta_1 in EASE_I_BETA_1_SPACE
                 for beta_2 in EASE_I_BETA_2_SPACE
             ]
         raise ValueError(f"EASE parameter space is not defined for {model_name}.")
 
-    def default_model_parameters(model_name):
-        if model_name == "S_EASE_I":
-            return {"lambda_": 500.0, "beta_1": 1.0, "beta_2": 1.0}
-        elif model_name == "S_EASE_U":
-            return {"lambda_": 500.0, "beta_1": 1.0, "beta_2": 1.0}
-        elif model_name == "S_SGFCF":
-            return dict(original_sgfcf_parameter_space()[0])
-        elif model_name == "IGF_EASE":
-            return {"beta_1": 1.0, "beta_2": 1.1, "alpha": 1.0,
-                    "eps": 0.5, "lambda_": 50.0, "gamma": 1.0, "k": int(search_k_values[0])}
-        elif model_name == "Ensemble_3Way":
-            def_sgfcf = dict(original_sgfcf_parameter_space()[0])
-            def_ease = {"lambda_": 500.0}
-            sgfcf_p = saved_parameters.get("S_SGFCF", def_sgfcf)
-            if isinstance(sgfcf_p, list): sgfcf_p = sgfcf_p[0]
-            ease_i_p = saved_parameters.get("S_EASE_I", def_ease)
-            if isinstance(ease_i_p, list): ease_i_p = ease_i_p[0]
-            ease_u_p = saved_parameters.get("S_EASE_U", def_ease)
-            if isinstance(ease_u_p, list): ease_u_p = ease_u_p[0]
-            return {
-                "sgfcf_params": sgfcf_p,
-                "ease_i_params": ease_i_p,
-                "ease_u_params": ease_u_p,
-                "gamma_i": 0.3,
-                "gamma_u": 0.3
-            }
-        raise ValueError(f"Unknown model: {model_name}")
-
     def model_parameter_space(model_name):
-        if model_name in ("S_EASE_I", "S_EASE_U"):
+        if model_name in ("EASE_I", "EASE_U"):
             return ease_parameter_space(model_name)
-        elif model_name == "S_SGFCF":
+        if model_name == "SGFCF":
             return original_sgfcf_parameter_space()
-        elif model_name == "IGF_EASE":
-            return [dict(beta_1=b1, beta_2=b2, alpha=alpha, eps=eps,
-                         lambda_=lambda_, gamma=gamma, k=k)
-                    for alpha in (0.0, 1.0, 20.0)
-                    for eps in (0.1, 0.3, 0.5)
-                    for k in search_k_values
-                    for lambda_ in (50, 500, 1000)
-                    for b1, b2, gamma in product((0.8, 1.0), (1.1, 1.3),
-                                                   (0.1, 0.5, 1.0))]
-        elif model_name == "Ensemble_3Way":
-            sgfcf_space = original_sgfcf_parameter_space()
-            ease_i_space = ease_parameter_space("S_EASE_I")
-            ease_u_space = ease_parameter_space("S_EASE_U")
-            
-            # gammas_i = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_I is None else [float(set_I)]
-            # gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
-
-            # gammas_i = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0] if set_I is None else [float(set_I)]
-            gammas_i = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_I is None else [float(set_I)]
-            gammas_u = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0] if set_U is None else [float(set_U)]
-
-            return [
-                {
-                    "sgfcf_params": sp,
-                    "ease_i_params": eip,
-                    "ease_u_params": eup,
-                    "gamma_i": round(gi, 2),
-                    "gamma_u": round(gu, 2)
-                }
-                for sp in sgfcf_space
-                for eip in ease_i_space
-                for eup in ease_u_space
-                for gi in gammas_i for gu in gammas_u if round(gi + gu, 2) <= 1.0
-            ]
-        raise ValueError(f"Unknown model: {model_name}")
+        raise ValueError(f"Validation search is not defined for {model_name}")
 
     # ---------------------------------------------------------
     # 3. Three-stage validation and ensemble search
     # ---------------------------------------------------------
     # The three-way model is deliberately selected entirely on val.txt:
-    # 1) retain the top 10 SGFCF and top 3 EASE-I/EASE-U settings, then 2)
+    # 1) retain the top 10 SGFCF and top 5 EASE-I/EASE-U settings, then 2)
     # choose the best component triplet and valid gamma pair from them.
     # test.txt is reached only once, after all validation decisions are fixed.
-    TOP_COMPONENT_PARAMS = 10
-    EASE_TOP_COMPONENT_PARAMS = 3
+    SGFCF_TOP_COMPONENT_PARAMS = 10
+    EASE_TOP_COMPONENT_PARAMS = 5
+    GAMMA_SEARCH_SPACE = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9)
+
     def gamma_parameter_pairs():
-        gamma_values = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
-        gamma_i_values = gamma_values if set_I is None else (float(set_I),)
-        gamma_u_values = gamma_values if set_U is None else (float(set_U),)
-        return [
+        gamma_i_values = GAMMA_SEARCH_SPACE if set_I is None else (float(set_I),)
+        gamma_u_values = GAMMA_SEARCH_SPACE if set_U is None else (float(set_U),)
+        pairs = [
             (round(gamma_i, 2), round(gamma_u, 2))
             for gamma_i in gamma_i_values
             for gamma_u in gamma_u_values
             if round(gamma_i + gamma_u, 2) <= 1.0
         ]
+        if not pairs:
+            raise ValueError("set_I/set_U leave no valid gamma pair in the search space.")
+        return pairs
 
     def clear_cuda_cache():
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    def search_top_parameters(model_name, candidates, keep_top=TOP_COMPONENT_PARAMS):
+    def search_top_parameters(model_name, candidates, keep_top=SGFCF_TOP_COMPONENT_PARAMS):
         """Evaluate every candidate on val.txt and return its top settings."""
         ranked = []
         best_score = -np.inf
@@ -468,27 +377,71 @@ try:
         clear_cuda_cache()
         return scores
 
-    if world.input_model == "Ensemble_3Way" and val_true == 1:
-        # Stage 1: each independent component is searched exclusively on val.txt.
-        top_sgfcf, sgfcf_validation = search_top_parameters(
-            "S_SGFCF", original_sgfcf_parameter_space())
-        top_ease_i, ease_i_validation = search_top_parameters(
-            "S_EASE_I", ease_parameter_space("S_EASE_I"), EASE_TOP_COMPONENT_PARAMS)
-        top_ease_u, ease_u_validation = search_top_parameters(
-            "S_EASE_U", ease_parameter_space("S_EASE_U"), EASE_TOP_COMPONENT_PARAMS)
-        save_best_parameters("S_SGFCF", top_sgfcf)
-        save_best_parameters("S_EASE_I", top_ease_i)
-        save_best_parameters("S_EASE_U", top_ease_u)
+    def parameter_signature(parameters):
+        """Create a hashable representation including every parameter key and value."""
+        return tuple(sorted(parameters.items()))
 
-        # Stage 2: evaluate every retained component triplet and gamma pair on
-        # val.txt.  SGFCF and EASE-U are CPU-resident reusable score objects;
-        # EASE-I is retained one setting at a time to bound peak memory.
+    def saved_parameter_pool(model_name, candidates, expected_count):
+        """Return a complete, current-grid-compatible saved top-parameter list."""
+        parameters = saved_parameters.get(model_name)
+        if not isinstance(parameters, list) or len(parameters) != expected_count:
+            return None
+        if not all(isinstance(parameter, dict) for parameter in parameters):
+            return None
+
+        # A saved entry must be exactly one candidate in the current search
+        # grid. This validates its parameter names and values and invalidates
+        # pools created with an older search-space definition.
+        valid_signatures = {parameter_signature(candidate) for candidate in candidates}
+        saved_signatures = [parameter_signature(parameter) for parameter in parameters]
+        if any(signature not in valid_signatures for signature in saved_signatures):
+            return None
+        if len(set(saved_signatures)) != expected_count:
+            return None
+        return parameters
+
+    def load_or_search_parameter_pool(model_name, candidates, keep_top):
+        """Reuse a valid complete top list; otherwise regenerate it on val.txt."""
+        expected_count = min(keep_top, len(candidates))
+        parameters = saved_parameter_pool(model_name, candidates, expected_count)
+        if parameters is not None:
+            world.cprint(
+                f"Found {expected_count} saved {model_name} parameters; skipping validation search."
+            )
+            return parameters, None
+
+        world.cprint(
+            f"Saved {model_name} parameters are missing, incomplete, or incompatible; "
+            "searching val.txt."
+        )
+        parameters, validation_result = search_top_parameters(
+            model_name, candidates, keep_top=keep_top
+        )
+        # Persist the complete ranked pool used by later ensemble validation.
+        save_best_parameters(model_name, parameters)
+        return parameters, validation_result
+
+    if world.input_model == "Ensemble_3Way":
+        # Component parameter pools are reused only when their saved list has
+        # the requested size.  The ensemble/gamma search below always reruns.
+        top_sgfcf, sgfcf_validation = load_or_search_parameter_pool(
+            "SGFCF", original_sgfcf_parameter_space(), SGFCF_TOP_COMPONENT_PARAMS
+        )
+        top_ease_i, ease_i_validation = load_or_search_parameter_pool(
+            "EASE_I", ease_parameter_space("EASE_I"), EASE_TOP_COMPONENT_PARAMS
+        )
+        top_ease_u, ease_u_validation = load_or_search_parameter_pool(
+            "EASE_U", ease_parameter_space("EASE_U"), EASE_TOP_COMPONENT_PARAMS
+        )
+
+        # Always rerun ensemble validation on val.txt.  This reselects the
+        # component combination and gamma_i/gamma_u before each test run.
         validation_sgfcf = {
-            repr(params): cpu_component_scores("S_SGFCF", params)
+            repr(params): cpu_component_scores("SGFCF", params)
             for params in top_sgfcf
         }
         validation_ease_u = {
-            repr(params): cpu_component_scores("S_EASE_U", params)
+            repr(params): cpu_component_scores("EASE_U", params)
             for params in top_ease_u
         }
         gamma_pairs = gamma_parameter_pairs()
@@ -499,7 +452,7 @@ try:
         search_index = 0
 
         for ease_i_params in top_ease_i:
-            ease_i_scores = cpu_component_scores("S_EASE_I", ease_i_params)
+            ease_i_scores = cpu_component_scores("EASE_I", ease_i_params)
             for ease_u_params in top_ease_u:
                 ease_u_scores = validation_ease_u[repr(ease_u_params)]
                 for sgfcf_params in top_sgfcf:
@@ -508,7 +461,8 @@ try:
                         search_index += 1
                         scores = model.Ensemble3WayScoreMatrix(
                             sgfcf_scores, ease_i_scores, ease_u_scores,
-                            gamma_i, gamma_u)
+                            gamma_i, gamma_u,
+                        )
                         result = metric(scores, search_model, search_dataset)
                         score = float(result["recall"][0])
                         if score > best_score:
@@ -530,17 +484,16 @@ try:
             del ease_i_scores
             clear_cuda_cache()
 
-        # Stage 3: construct the selected scoring matrices on the test loader
-        # and evaluate them once against test.txt.
+        # The final model is evaluated only after the fresh validation choice.
         test_scores = score_model(Recmodel, "Ensemble_3Way", best_params, cache)
         test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
         save_best_parameters("Ensemble_3Way", best_params, test_results=test_result)
 
         world.cprint(f"=== Dataset: {dataset_name} ===")
         world.cprint("=== Validation / search results ===")
-        world.cprint(f"SGFCF top-{TOP_COMPONENT_PARAMS} validation best: {sgfcf_validation}")
-        world.cprint(f"EASE_I top-{EASE_TOP_COMPONENT_PARAMS} validation best: {ease_i_validation}")
-        world.cprint(f"EASE_U top-{EASE_TOP_COMPONENT_PARAMS} validation best: {ease_u_validation}")
+        world.cprint(f"SGFCF top-{len(top_sgfcf)} validation best: {sgfcf_validation}")
+        world.cprint(f"EASE_I top-{len(top_ease_i)} validation best: {ease_i_validation}")
+        world.cprint(f"EASE_U top-{len(top_ease_u)} validation best: {ease_u_validation}")
         world.cprint(f"Ensemble_3Way validation: {best_result}")
         world.cprint("=== Final test results ===")
         print(f"\033[0;30;43mEnsemble_3Way test: {test_result}\033[0m", end=" ")
@@ -549,44 +502,30 @@ try:
         del test_scores, validation_sgfcf, validation_ease_u
         clear_cuda_cache()
     else:
-        # Preserve direct single-model validation/test behavior.
-        best_score = -np.inf
-        best_params = default_model_parameters(world.input_model)
-        best_result = None
-
-        if val_true:
-            candidates = model_parameter_space(world.input_model)
-            for index, params in enumerate(candidates, 1):
-                scores = score_model(search_model, world.input_model, params, cache)
-                result = metric(scores, search_model, search_dataset)
-                score = float(result["recall"][0])
-                if score > best_score:
-                    best_score = score
-                    best_params = params
-                    best_result = result
-                del scores
-                if index % 10 == 0 or index == len(candidates):
-                    print(f"\033[0;30;43m{world.input_model} search {index}/{len(candidates)}: best Recall@20={best_score:.6f}\033[0m", end=" ")
-                    print(f"| best_params={best_params}")
-            save_best_parameters(world.input_model, best_params)
-        elif saved_model:
-            best_params = saved_model[0] if isinstance(saved_model, list) else saved_model
-
+        # Direct models use the same saved top-pool policy, then test the
+        # highest-ranked setting (the first element of the ranked list).
+        keep_top = (
+            SGFCF_TOP_COMPONENT_PARAMS
+            if world.input_model == "SGFCF"
+            else EASE_TOP_COMPONENT_PARAMS
+        )
+        parameter_pool, validation_result = load_or_search_parameter_pool(
+            world.input_model, model_parameter_space(world.input_model), keep_top
+        )
+        best_params = parameter_pool[0]
         test_scores = score_model(Recmodel, world.input_model, best_params, cache)
         test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
-        if val_true or saved_model is not None:
-            save_best_parameters(world.input_model, best_params, test_results=test_result)
+        save_best_parameters(world.input_model, parameter_pool, test_results=test_result)
 
         world.cprint(f"=== Dataset: {dataset_name} ===")
         world.cprint("=== Validation / search results ===")
-        world.cprint(f"{world.input_model} validation: {best_result}")
+        world.cprint(f"{world.input_model} validation: {validation_result}")
         world.cprint("=== Final test results ===")
         print(f"\033[0;30;43m{world.input_model} test: {test_result}\033[0m", end=" ")
         print(f"| params: {best_params}")
 
         del test_scores
         clear_cuda_cache()
-    
 
 
 

@@ -27,7 +27,7 @@ def parse_args():
     
     parser.add_argument('--model', type=str, default='pse-model')
     
-    parser.add_argument('--input_model', type=str, default='S_EASE_I', help='input model')
+    parser.add_argument('--input_model', type=str, default='EASE_I', help='input model')
 
     parser.add_argument('--params_filename', type=str, default='params',
                         help='Parameter log filename (without .txt)')

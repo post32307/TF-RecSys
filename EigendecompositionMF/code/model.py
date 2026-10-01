@@ -48,11 +48,14 @@ class LowRankEASEUScoreMatrix:
         
         U, S, Vt = svds(X.astype(np.float32), k=k)
         
+        # X @ X.T has eigenvalues sigma^2 and left eigenvectors U.  This
+        # is the user-user Gram ridge response h(sigma^2).
         Lambda = S ** 2
-        self.D = Lambda / (Lambda + float(lambda_))
+        self.gram_response = Lambda / (Lambda + float(lambda_))
+        self.D = self.gram_response  # Backward-compatible alias.
         self.U = U
         self.lambda_ = float(lambda_)
-        self.response = np.broadcast_to(self.D, self.U.shape).copy()
+        self.response = np.broadcast_to(self.gram_response, self.U.shape).copy()
         self.z = np.sum((U ** 2) * self.response, axis=1)
         self.Ut_X = self.U.T @ self.X
 
@@ -175,7 +178,8 @@ class TFmodel:
 
     # Model Functions
 
-    def S_EASE_I(self, lambda_=50.0, beta_1=0.9, beta_2=1.1, cache=None):
+    def S_EASE_I(self, lambda_=50.0, beta_1=0.9, beta_2=1.1, cache=None,
+                 implementation_version=3):
         """Return item-EASE scores using an SVD ridge solve, not ``inv``.
 
         For ``X = U Σ Vᵀ``, the EASE precision matrix is
@@ -184,6 +188,9 @@ class TFmodel:
         zero-diagonal coefficient constraint without materialising ``P`` or
         calling a dense matrix inverse.
         """
+        if int(implementation_version) != 3:
+            raise ValueError("S_EASE_I parameters must be revalidated for implementation 3.")
+
         regularization = float(lambda_)
         if regularization <= 0.0:
             raise ValueError("S_EASE_I requires lambda_ > 0 for the ridge SVD solve.")
@@ -208,49 +215,55 @@ class TFmodel:
                 svd_cache[model_key] = (singular_values, right_vectors)
 
         inverse_lambda = 1.0 / regularization
-        spectral_correction = (
-            1.0 / (singular_values ** 2 + regularization) - inverse_lambda
-        )
-        # ``individual_weight`` is defined for non-negative filter responses.
-        # Apply it to the correction magnitude, restore the original (negative)
-        # ridge-correction sign, and obtain an item-by-component response.
-        _, item_homophily = self.compute_homophily()
-        correction_magnitude = torch.as_tensor(
-            np.abs(spectral_correction), dtype=torch.float64
-        )
-        adaptive_correction = self.individual_weight(
-            correction_magnitude, item_homophily, beta_1, beta_2
+        # X.T @ X has eigenvalues sigma^2 and right eigenvectors V.  Apply
+        # the individual graph filter directly to its ridge response
+        # h(sigma^2) = sigma^2 / (sigma^2 + lambda), rather than to the
+        # lambda-scaled precision correction.
+        gram_response = singular_values ** 2 / (singular_values ** 2 + regularization)
+        _, item_homophily = self.compute_EASE_homophily()
+        adaptive_response = self.individual_weight(
+            torch.as_tensor(gram_response, dtype=torch.float64),
+            item_homophily,
+            beta_1,
+            beta_2,
         ).cpu().numpy()
-        adaptive_correction *= np.sign(spectral_correction)[None, :]
 
-        # The response is item-specific, so both diag(P) and XP use the same
-        # weighted V rows.  beta_1=beta_2=1 reproduces ordinary EASE-I.
-        precision_diagonal = inverse_lambda + np.sum(
-            (right_vectors ** 2) * adaptive_correction, axis=1
+        # P = (I - V diag(h) V.T) / lambda.  Replacing h with the
+        # item-specific response retains ordinary EASE-I when beta_1=beta_2=1.
+        # Both diag(P) and XP must use the same right-vector response.
+        response_diagonal = np.sum(
+            (right_vectors ** 2) * adaptive_response, axis=1
         )
+        precision_diagonal = inverse_lambda * (1.0 - response_diagonal)
         precision_diagonal = np.maximum(precision_diagonal, np.finfo(np.float64).eps)
 
-        # XP = X P = X/lambda + (X V) [V * adaptive_correction]^T.
+        # XP = X P = [X - (X V) (V * adaptive_response).T] / lambda.
         XP = self.R.dot(right_vectors)
-        XP = XP.dot((right_vectors * adaptive_correction).T)
-        XP += self.R.toarray().astype(np.float64, copy=False) * inverse_lambda
+        XP = XP.dot((right_vectors * adaptive_response).T)
+        XP = (
+            self.R.toarray().astype(np.float64, copy=False) - XP
+        ) * inverse_lambda
 
         # -XP / diag(P) corresponds to X[-P/diag(P)].  The latter has a -1
         # diagonal, so adding X is exactly EASE's B_ii = 0 correction.
         pred = self.R.toarray().astype(np.float64, copy=False) - XP / precision_diagonal[None, :]
         return torch.sigmoid(torch.as_tensor(pred, dtype=torch.float32, device=self.device))
 
-    def S_EASE_U(self, lambda_=50.0, beta_1=1.0, beta_2=1.0, cache=None):
+    def S_EASE_U(self, lambda_=50.0, beta_1=1.0, beta_2=1.0, cache=None,
+                 implementation_version=3):
+        if int(implementation_version) != 3:
+            raise ValueError("S_EASE_U parameters must be revalidated for implementation 3.")
+
         # Keep EASE-U independent of SGFCF's searched/mutable rank.  scipy
         # svds requires k < min(R.shape), hence the minus one cap.
         ease_u_k = max(1, min(128, min(self.R.shape) - 1))
         scorer = LowRankEASEUScoreMatrix(self.R, k=ease_u_k, lambda_=lambda_)
 
-        # EASE-U filters user-space singular components, so use the user
-        # homophily response (the EASE-I analogue uses item homophily).
-        user_homophily, _ = self.compute_homophily()
+        # R @ R.T has left eigenvectors U. Apply IGF directly to its Gram
+        # ridge response h(sigma^2), using the corresponding user homophily.
+        user_homophily, _ = self.compute_EASE_homophily()
         response = self.individual_weight(
-            torch.as_tensor(scorer.D, dtype=torch.float64),
+            torch.as_tensor(scorer.gram_response, dtype=torch.float64),
             user_homophily,
             beta_1,
             beta_2,
@@ -367,6 +380,60 @@ class TFmodel:
             neighbors = graph.indices[graph.indptr[node]:graph.indptr[node + 1]]
             count += np.count_nonzero(marker[neighbors] == stamp)
         return count, stamp
+
+    def _gram_support_graph(self, gram_matrix):
+        """Return the unweighted, diagonal-free topology of a Gram graph."""
+        graph = gram_matrix.tocsr(copy=True)
+        graph.setdiag(0)
+        graph.eliminate_zeros()
+        # A positive Gram entry is an edge induced by at least one shared
+        # interaction.  Keep this full R.T@R / R@R.T topology: unlike SGFCF's
+        # thresholded cross-projection graph, it is the graph EASE filters.
+        graph.data = np.ones(graph.nnz, dtype=np.int8)
+        return graph
+
+    def _local_graph_homophily(self, graph):
+        """Compute each graph node's local-neighborhood cohesion."""
+        ratios = np.zeros(graph.shape[0], dtype=np.float32)
+        marker = np.zeros(graph.shape[0], dtype=np.int32)
+        stamp = 0
+        for node in range(graph.shape[0]):
+            neighbors = graph.indices[graph.indptr[node]:graph.indptr[node + 1]]
+            edges, stamp = self._induced_edges(graph, neighbors, marker, stamp)
+            if len(neighbors) > 1:
+                # ``edges`` is directed because the sparse graph stores both
+                # directions; the same directed denominator yields the local
+                # clustering coefficient in [0, 1].
+                ratios[node] = edges / (len(neighbors) * (len(neighbors) - 1))
+        return ratios
+
+    def compute_EASE_homophily(self):
+        """Compute graph-aligned EASE personalization statistics.
+
+        EASE-I filters the item-item Gram spectrum ``R.T @ R``; its item
+        statistic is therefore the local-neighborhood cohesion of each item
+        in that graph.  EASE-U analogously receives one user statistic from
+        the user-user Gram graph ``R @ R.T``.  These are deliberately kept
+        separate from :meth:`compute_homophily`, whose values are SGFCF's
+        cross-projection signals.
+        """
+        cached = getattr(self, "_ease_homophily_cache", None)
+        if cached is not None:
+            return cached
+
+        R = self.R.astype(np.float32).tocsr()
+        item_graph = self._gram_support_graph(R.T.dot(R))
+        user_graph = self._gram_support_graph(R.dot(R.T))
+        item_ratio = self._local_graph_homophily(item_graph)
+        user_ratio = self._local_graph_homophily(user_graph)
+
+        # Parameter searches reuse these values extensively. Keep them on CPU
+        # and transfer only the active response calculation to the accelerator.
+        self._ease_homophily_cache = (
+            torch.as_tensor(user_ratio, dtype=torch.float32),
+            torch.as_tensor(item_ratio, dtype=torch.float32),
+        )
+        return self._ease_homophily_cache
 
     def compute_homophily(self):
         """Compute SGFCF user/item homophily ratios."""
