@@ -294,9 +294,9 @@ try:
     # and EASE-U both use these beta values for their IGF responses.
     EASE_LAMBDA_SPACE = (50.0, 100.0, 200.0, 500.0, 1000.0)
     # EASE_I_BETA_1_SPACE = (0.8, 1.0)
-    EASE_I_BETA_1_SPACE = (1.0)
+    EASE_I_BETA_1_SPACE = (1.0,)
     # EASE_I_BETA_2_SPACE = (1.0, 1.2)
-    EASE_I_BETA_2_SPACE = (1.0)
+    EASE_I_BETA_2_SPACE = (1.0,)
 
     def ease_parameter_space(model_name):
         if model_name in ("EASE_I", "EASE_U"):
