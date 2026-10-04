@@ -220,7 +220,10 @@ class TFmodel:
         # h(sigma^2) = sigma^2 / (sigma^2 + lambda), rather than to the
         # lambda-scaled precision correction.
         gram_response = singular_values ** 2 / (singular_values ** 2 + regularization)
-        _, item_homophily = self.compute_EASE_homophily()
+        #################################################################################
+        _, item_homophily = self.compute_EASE_homophily() # EASE-specific homophily
+        # _, item_homophily = self.compute_homophily() # SGFCF homophily
+        #################################################################################
         adaptive_response = self.individual_weight(
             torch.as_tensor(gram_response, dtype=torch.float64),
             item_homophily,
@@ -261,7 +264,10 @@ class TFmodel:
 
         # R @ R.T has left eigenvectors U. Apply IGF directly to its Gram
         # ridge response h(sigma^2), using the corresponding user homophily.
-        user_homophily, _ = self.compute_EASE_homophily()
+        #################################################################################
+        user_homophily, _ = self.compute_EASE_homophily() # EASE-specific homophily
+        # user_homophily, _ = self.compute_homophily() # SGFCF homophily
+        #################################################################################
         response = self.individual_weight(
             torch.as_tensor(scorer.gram_response, dtype=torch.float64),
             user_homophily,

@@ -1,6 +1,7 @@
 import world
 import torch
-torch.set_num_threads(4)
+# torch.set_num_threads(4)
+torch.set_num_threads(3)
 import os
 import time
 import gc
@@ -46,7 +47,7 @@ try:
         raise ValueError("fixed_k must be 0 or 1.")
 
     set_I = None
-    set_U = None
+    set_U = 0.0
     #   None None : search gamma_I and gamma_U
     #   0.x None : fix gamma_I and search gamma_U
     #   None 0.y : search gamma_I and fix gamma_U
@@ -292,8 +293,10 @@ try:
     # paths use these definitions to prevent parameter-grid drift.  EASE-I
     # and EASE-U both use these beta values for their IGF responses.
     EASE_LAMBDA_SPACE = (50.0, 100.0, 200.0, 500.0, 1000.0)
-    EASE_I_BETA_1_SPACE = (0.8, 1.0)
-    EASE_I_BETA_2_SPACE = (1.0, 1.2)
+    # EASE_I_BETA_1_SPACE = (0.8, 1.0)
+    EASE_I_BETA_1_SPACE = (1.0)
+    # EASE_I_BETA_2_SPACE = (1.0, 1.2)
+    EASE_I_BETA_2_SPACE = (1.0)
 
     def ease_parameter_space(model_name):
         if model_name in ("EASE_I", "EASE_U"):
