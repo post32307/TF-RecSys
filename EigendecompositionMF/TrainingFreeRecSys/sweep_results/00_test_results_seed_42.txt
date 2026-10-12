@@ -1,5 +1,12 @@
 Final Test Results Summary (Seed: 42)
 Run started:
+Tue Jul  7 15:47:54 2026 : BSPM / amazon-electronics
+Wed Jul  8 07:31:48 2026 : BSPM / epinions
+Wed Jul  8 17:39:18 2026 : BSPM / epinions
+Wed Jul  8 21:36:58 2026 : BSPM / epinions
+Sun Jul 12 17:11:26 2026 : BSPM / yelp2018
+Thu Jul 30 20:02:13 2026 : ChebyCF / amazon-electronics
+Wed Aug  5 00:31:50 2026 : DAN / amazon-electronics
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
