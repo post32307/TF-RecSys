@@ -27,14 +27,16 @@ def parse_args():
     
     parser.add_argument('--model', type=str, default='pse-model')
 
-    parser.add_argument('--params_filename', type=str, default='params',
+    parser.add_argument('--params_filename', type=str, default='default_filename',
                         help='Parameter log filename (without .txt)')
 
     parser.add_argument('--ensemble_models', nargs='+',
-                        default=['DAN', 'SGFCF'],
+                        default=['EASE', 'SGFCF'],
                         choices=['BSPM', 'EASE', 'GF-CF', 'PGSP',
                                  'TurboCF', 'SGFCF', 'ChebyCF', 'DAN'],
                         help='Models to include in the ensemble')
+
+    parser.add_argument('--ensemble_k', type=int, default=3)
     
     parser.add_argument('--gpu_ID', type=int, default=0)
     
