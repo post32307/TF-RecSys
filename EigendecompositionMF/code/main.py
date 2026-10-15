@@ -67,6 +67,8 @@ else:
     world.cprint("not enable tensorflowboard")
 
 try:
+
+    # # # Important : The model now performs averaging on the stage1 ensemble models. It then looks for the best a_sum only in the second stage.
     
     val_true = 1
     #   0: no hyperparameter search; test default params on test.txt
@@ -199,7 +201,13 @@ try:
                             world.cprint("Ignoring old ChebyCF parameters; the corrected model requires validation.")
                             continue
                     elif isinstance(parameters, dict) and "ChebyCF" in parameters:
-                        if parameters["ChebyCF"].get("implementation_version") != 2:
+                        candidates = parameters["ChebyCF"]
+                        if isinstance(candidates, dict):
+                            candidates = [candidates]
+                        if not candidates or any(
+                            not isinstance(p, dict) or p.get("implementation_version") != 2
+                            for p in candidates
+                        ):
                             world.cprint("Ignoring ensemble parameters fitted with the old ChebyCF implementation.")
                             continue
                     saved[model_key] = parameters
