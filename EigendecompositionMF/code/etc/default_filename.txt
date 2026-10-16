@@ -1,0 +1,1 @@
+epinions : 2026 : BSPM : [{'k': 16, 'alpha': 0.3, 'beta': 0.3, 'gamma': 0.5}, {'k': 16, 'alpha': 0.3, 'beta': 0.3, 'gamma': 1.0}, {'k': 32, 'alpha': 0.3, 'beta': 0.3, 'gamma': 0.5}, {'k': 32, 'alpha': 0.3, 'beta': 0.3, 'gamma': 1.0}]
