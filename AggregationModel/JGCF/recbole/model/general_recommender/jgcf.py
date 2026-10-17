@@ -140,9 +140,7 @@ class JGCF(GeneralRecommender):
             Sparse tensor of the normalized interaction matrix.
         """
         # build adj matrix
-        A = sp.dok_matrix(
-            (self.n_users + self.n_items, self.n_users + self.n_items), dtype=np.float32
-        )
+        graph_size = self.n_users + self.n_items
         inter_M = self.interaction_matrix
         inter_M_t = self.interaction_matrix.transpose()
         data_dict = dict(
@@ -156,8 +154,13 @@ class JGCF(GeneralRecommender):
                 )
             )
         )
-        A._update(data_dict)
-        L = A.tocoo()
+        # Build COO directly; newer SciPy versions disallow direct updates to
+        # DOK matrices and removed the old private ``_update`` method.
+        edge_rows = np.fromiter((edge[0] for edge in data_dict), dtype=np.int64)
+        edge_cols = np.fromiter((edge[1] for edge in data_dict), dtype=np.int64)
+        edge_values = np.fromiter(data_dict.values(), dtype=np.float32)
+        L = sp.coo_matrix((edge_values, (edge_rows, edge_cols)),
+                          shape=(graph_size, graph_size))
         
         edge_index = torch.tensor([L.row, L.col], dtype=torch.long, device=self.device)
         return edge_index

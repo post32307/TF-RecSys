@@ -9,6 +9,7 @@ import world
 import torch
 from torch import nn, optim
 import numpy as np
+import random
 from torch import log
 from dataloader import BasicDataset
 from time import time
@@ -105,6 +106,7 @@ def UniformSample_original_python(dataset):
 # =====================utils====================================
 
 def set_seed(seed):
+    random.seed(seed)
     np.random.seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)

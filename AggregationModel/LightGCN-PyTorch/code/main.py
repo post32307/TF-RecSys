@@ -8,7 +8,23 @@ import time
 from os.path import join
 
 import torch
-from tensorboardX import SummaryWriter
+try:
+    from tensorboardX import SummaryWriter
+except ModuleNotFoundError:
+    class SummaryWriter:
+        """No-op fallback when optional TensorBoard logging is unavailable."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def add_scalars(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            pass
 
 import Procedure
 import dataloader
@@ -274,6 +290,7 @@ def parse_result_line(raw_line):
         "results": metrics,
         "params": params,
         "params_key": param_key(params),
+        "epochs": int(next((part.split("=", 1)[1] for part in parts if part.startswith("epochs=")), "0")),
         "split_path": split_part.split("=", 1)[1] if "=" in split_part else "",
         "line": raw_line,
     }
@@ -357,6 +374,10 @@ def best_existing_validation(dataset, seed, allowed_params=None):
     best_row = None
     best_score = None
     for row in existing_results("val", dataset, seed):
+        # Search trials are defined as 20-epoch validation runs. Do not reuse
+        # results from earlier runs that used a different training budget.
+        if row.get("epochs") != 20:
+            continue
         if allowed_keys is not None and row["params_key"] not in allowed_keys:
             continue
         score = score_results(row["results"])
@@ -414,6 +435,7 @@ def search_params(writer):
     completed_keys = {
         row["params_key"]
         for row in existing_results("val", world.dataset, world.seed)
+        if row.get("epochs") == 20
     }
     pending_params = [
         params for params in params_grid
@@ -436,17 +458,22 @@ def search_params(writer):
             f"Recall@{world.topks[0]}={best_score:.6f}"
         )
 
-    for params in pending_params:
-        print(f"\n[SEARCH] params=(recdim={params[0]}, lr={params[1]}, decay={params[2]}, layer={params[3]})")
-        validation_results, _, epochs, _, runtime = train_and_eval(params, test_eval_file="val.txt", writer=writer)
-        current_score = score_results(validation_results)
-        append_result("val", params, validation_results, epochs, runtime, join(world.SPLIT_PATH, world.dataset))
-        print(f"[SEARCH] Recall@{world.topks[0]}={current_score:.6f}")
-        if best_score is None or current_score > best_score:
-            best_score = current_score
-            best_params = params
-            best_results = validation_results
-            print(f"[SEARCH] new best params={best_params}, recall={best_score:.6f}")
+    full_epoch_budget = world.TRAIN_epochs
+    world.TRAIN_epochs = 20
+    try:
+        for params in pending_params:
+            print(f"\n[SEARCH] params=(recdim={params[0]}, lr={params[1]}, decay={params[2]}, layer={params[3]})")
+            validation_results, _, epochs, _, runtime = train_and_eval(params, test_eval_file="val.txt", writer=writer)
+            current_score = score_results(validation_results)
+            append_result("val", params, validation_results, 20, runtime, join(world.SPLIT_PATH, world.dataset))
+            print(f"[SEARCH] Recall@{world.topks[0]}={current_score:.6f}")
+            if best_score is None or current_score > best_score:
+                best_score = current_score
+                best_params = params
+                best_results = validation_results
+                print(f"[SEARCH] new best params={best_params}, recall={best_score:.6f}")
+    finally:
+        world.TRAIN_epochs = full_epoch_budget
 
     if best_params is None:
         raise RuntimeError(
@@ -455,7 +482,24 @@ def search_params(writer):
         )
 
     print(f"\n[SEARCH] best params={best_params}, validation results={best_results}")
+    append_selected_results("hyperparameter_search.txt", best_results, best_params)
     return best_params
+
+
+def append_selected_results(filename, results, params, dataset=None, seed=None):
+    path = join(world.ROOT_PATH, "results", filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    params_dict = {
+        "recdim": params[0], "lr": params[1], "decay": params[2],
+        "layer": params[3], "bpr_batch": world.config['bpr_batch_size'],
+        "topks": world.topks,
+    }
+    with open(path, "a") as output:
+        output.write(
+            f"{dataset or world.dataset} | {world.seed if seed is None else seed} | {format_results(results)} | "
+            f"{json.dumps(params_dict, sort_keys=True)}\n"
+        )
+    print(f"[RESULTS] appended to {path}")
 
 
 def expand_list(values):
@@ -522,11 +566,17 @@ def child_command(dataset, seed, result_file, task_mode="full", params=None):
         "early_stop_interval", "early_stop_min_epochs"
     ):
         add_arg(cmd, name, getattr(args, name))
+    # The scheduler masks each child's assigned physical GPU in child_env;
+    # inside that child the selected device is therefore logical cuda:0.
+    add_arg(cmd, "gpu_ID", 0)
     add_arg(cmd, "dataset", dataset)
     add_arg(cmd, "seed", seed)
     add_arg(cmd, "single_run", 1)
     add_arg(cmd, "child_result_file", result_file)
     add_arg(cmd, "task_mode", task_mode)
+    if task_mode == "val":
+        # Every grid candidate uses the same fixed 20-epoch budget.
+        add_arg(cmd, "epochs", 20)
     if params is not None:
         add_arg(cmd, "task_recdim", params[0])
         add_arg(cmd, "task_lr", params[1])
@@ -642,11 +692,14 @@ def attach_task_files(task, tmp_dir, log_dir):
 
 
 def task_existing_result(task, include_tmp=True):
-    return first_existing_result(
+    row = first_existing_result(
         task["task_mode"], task["dataset"], task["seed"], task["params"]
     ) if include_tmp else first_existing_final_result(
         task["task_mode"], task["dataset"], task["seed"], task["params"]
     )
+    if task["task_mode"] == "val" and row is not None and row.get("epochs") != 20:
+        return None
+    return row
 
 
 def task_param_text(task):
@@ -880,6 +933,10 @@ def maybe_enqueue_search_test(unit_key, unit_states, params_grid, ready_tests,
         )
 
     best_params = best_row["params"]
+    append_selected_results(
+        "hyperparameter_search.txt", best_row["results"], best_params,
+        dataset=dataset, seed=seed,
+    )
     state["best_params"] = best_params
     print(
         f"[SCHEDULER] best params for {dataset} seed={seed}: "
@@ -894,6 +951,10 @@ def maybe_enqueue_search_test(unit_key, unit_states, params_grid, ready_tests,
         if task_existing_result(task, include_tmp=False) is None:
             write_cached_child_result(task["result_file"], task)
         state["test_done"] = True
+        append_selected_results(
+            "test_results.txt", existing["results"], best_params,
+            dataset=dataset, seed=seed,
+        )
         print(
             f"[SCHEDULER] resume: skipping existing test for "
             f"{dataset} seed={seed} {task_param_text(task)}"
@@ -1166,6 +1227,8 @@ def run_internal_task(writer):
 
     if world.args.task_mode == "val":
         existing_val = first_existing_result("val", world.dataset, world.seed, params)
+        if existing_val is not None and existing_val.get("epochs") != 20:
+            existing_val = None
         if existing_val is not None:
             print(
                 f"[TASK] resume: skipping existing validation for "
@@ -1176,8 +1239,7 @@ def run_internal_task(writer):
         validation_results, _, epochs, best_epoch, runtime = train_and_eval(
             params, test_eval_file="val.txt", writer=writer
         )
-        logged_epochs = best_epoch if best_epoch is not None else epochs
-        append_result("val", params, validation_results, logged_epochs, runtime, split_path)
+        append_result("val", params, validation_results, 20, runtime, split_path)
         return validation_results
 
     if world.args.task_mode == "test":
@@ -1199,6 +1261,7 @@ def run_internal_task(writer):
         if first_existing_result("val", world.dataset, world.seed, params) is None:
             append_result("val", params, validation_results, logged_epochs, runtime, split_path)
         append_result("test", params, final_results, logged_epochs, runtime, split_path)
+        append_selected_results("test_results.txt", final_results, params)
         return final_results
 
     raise ValueError(f"Unknown task mode: {world.args.task_mode}")
@@ -1332,12 +1395,12 @@ def run_scheduler():
 
 
 def main():
+    utils.set_seed(world.seed)
+    print(">>SEED:", world.seed)
     if scheduler_requested():
         run_scheduler()
         return
 
-    utils.set_seed(world.seed)
-    print(">>SEED:", world.seed)
     print(">>SPLIT:", join(world.SPLIT_PATH, world.dataset))
 
     if world.tensorboard:
@@ -1363,6 +1426,7 @@ def main():
             existing_test = first_existing_result("test", world.dataset, world.seed, best_params)
             if existing_test is not None:
                 final_results = existing_test["results"]
+                append_selected_results("test_results.txt", final_results, best_params)
                 print(
                     f"\n[FINAL] resume: skipping existing test for {world.dataset} "
                     f"seed={world.seed} params={best_params}"
@@ -1380,6 +1444,7 @@ def main():
                 if first_existing_result("val", world.dataset, world.seed, best_params) is None:
                     append_result("val", best_params, validation_results, logged_epochs, runtime, split_path)
                 append_result("test", best_params, final_results, logged_epochs, runtime, split_path)
+                append_selected_results("test_results.txt", final_results, best_params)
         else:
             params = (
                 world.config['latent_dim_rec'],

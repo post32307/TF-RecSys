@@ -321,7 +321,12 @@ class Trainer(AbstractTrainer):
         """
         resume_file = str(resume_file)
         self.saved_model_file = resume_file
-        checkpoint = torch.load(resume_file, map_location=self.device)
+        # RecBole checkpoints contain configuration and optimizer state in
+        # addition to tensors. This is a locally generated/trusted checkpoint;
+        # explicitly disable PyTorch 2.6+'s weights-only default.
+        checkpoint = torch.load(
+            resume_file, map_location=self.device, weights_only=False
+        )
         self.start_epoch = checkpoint["epoch"] + 1
         self.cur_step = checkpoint["cur_step"]
         self.best_valid_score = checkpoint["best_valid_score"]
@@ -581,7 +586,10 @@ class Trainer(AbstractTrainer):
 
         if load_best_model:
             checkpoint_file = model_file or self.saved_model_file
-            checkpoint = torch.load(checkpoint_file, map_location=self.device)
+            # This checkpoint was written by this trainer during fit().
+            checkpoint = torch.load(
+                checkpoint_file, map_location=self.device, weights_only=False
+            )
             self.model.load_state_dict(checkpoint["state_dict"])
             self.model.load_other_parameter(checkpoint.get("other_parameter"))
             message_output = "Loading model structure and parameters from {}".format(

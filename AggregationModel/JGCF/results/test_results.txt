@@ -1,0 +1,1 @@
+amazon-electronics | 2020 | {"ndcg@10": 0.057, "ndcg@20": 0.0727, "ndcg@50": 0.0948, "recall@10": 0.0896, "recall@20": 0.1397, "recall@50": 0.2292} | {"a": 2.0, "b": 1.0, "embedding_size": 128, "n_layers": 2, "reg_weight": 1e-05}

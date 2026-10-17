@@ -85,8 +85,9 @@ try:
     TOP_CANDIDATES = world.ensemble_k
     # Number of per-model candidates retained from the individual validation searches before the ensemble search.
 
-    a_sum_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
+    # a_sum_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
     # a_sum_space = (0.0,) # Removing secondary model
+    a_sum_space = (1.0,) # Removing primary model
     # a_sum_space = (0.5,) # Simple Average
     # Ensemble scores are (1-a_sum) * Model_1 + a_sum * Model_2
 

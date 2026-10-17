@@ -42,9 +42,12 @@ def parse_args():
     parser.add_argument('--multicore', type=int, default=0, help='whether we use multiprocessing or not in test')
     parser.add_argument('--pretrain', type=int, default=0, help='whether we use pretrained weight or not')
     parser.add_argument('--seed', type=int, default=2020, help='random seed')
+    parser.add_argument('--gpu_ID', type=int, default=0,
+                        help='physical GPU ID to use; use -1 to force CPU')
     parser.add_argument('--model', type=str, default='lgn', help='rec-model, support [mf, lgn]')
 
-    parser.add_argument('--search', type=int, default=0)
+    parser.add_argument('--search', type=int, default=1,
+                        help='run the validation grid search before final training')
     parser.add_argument('--search_recdims', nargs='?', default="[32, 64, 128]",
                         help="embedding sizes to try when --search=1")
     parser.add_argument('--search_lrs', nargs='?', default="[0.001, 0.0001]",
@@ -55,7 +58,7 @@ def parse_args():
                         help="LightGCN layers to try when --search=1")
     parser.add_argument('--early_stop', type=int, default=1,
                         help="enable early stopping on validation recall")
-    parser.add_argument('--early_stop_patience', type=int, default=10,
+    parser.add_argument('--early_stop_patience', type=int, default=20,
                         help="validation checks without improvement before stopping")
     parser.add_argument('--early_stop_delta', type=float, default=1e-5,
                         help="minimum validation recall improvement")

@@ -42,13 +42,51 @@ import gc
 import configparser
 import time
 import argparse
-from torch.utils.tensorboard import SummaryWriter
+import random
+import hashlib
+import json
+from pathlib import Path
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ModuleNotFoundError:
+    class SummaryWriter:
+        """No-op fallback when optional TensorBoard logging is unavailable."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
 
 
-def data_param_prepare(config_file):
+def set_seed(seed):
+    """Seed Python, NumPy, and PyTorch random generators."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    if hasattr(torch.backends, 'cudnn'):
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+
+def data_param_prepare(config_file, split_dir=None, gpu_id=None, config_overrides=None):
 
     config = configparser.ConfigParser()
     config.read(config_file)
+    for section, values in (config_overrides or {}).items():
+        if not config.has_section(section):
+            config.add_section(section)
+        for key, value in values.items():
+            config.set(section, key, str(value))
 
     params = {}
 
@@ -60,6 +98,7 @@ def data_param_prepare(config_file):
     params['model_save_path'] = model_save_path
     max_epoch = config.getint('Model', 'max_epoch')
     params['max_epoch'] = max_epoch
+    params['eval_interval'] = config.getint('Training', 'eval_interval', fallback=10)
 
     params['enable_tensorboard'] = config.getboolean('Model', 'enable_tensorboard')
     
@@ -69,9 +108,17 @@ def data_param_prepare(config_file):
     dataset = config['Training']['dataset']
     params['dataset'] = dataset
     train_file_path = config['Training']['train_file_path']
-    gpu = config['Training']['gpu']
+    valid_file_path = config.get('Testing', 'valid_file_path', fallback=None)
+    gpu = config['Training']['gpu'] if gpu_id is None else str(gpu_id)
     params['gpu'] = gpu
-    device = torch.device('cuda:'+ params['gpu'] if torch.cuda.is_available() else "cpu")
+    if int(gpu) < 0:
+        device = torch.device("cpu")
+    elif torch.cuda.is_available():
+        # --gpu_ID selects a physical ID via CUDA_VISIBLE_DEVICES, so it is
+        # exposed as logical device zero to the model.
+        device = torch.device('cuda:0')
+    else:
+        device = torch.device("cpu")
     params['device'] = device
     lr = config.getfloat('Training', 'learning_rate')
     params['lr'] = lr
@@ -106,10 +153,34 @@ def data_param_prepare(config_file):
 
     test_file_path = config['Testing']['test_file_path']
 
+    if split_dir is not None:
+        split_dir = Path(split_dir)
+        train_file_path = str(split_dir / 'train.txt')
+        valid_file_path = str(split_dir / 'val.txt')
+        test_file_path = str(split_dir / 'test.txt')
+        params['dataset'] = '{}_{}_indexed'.format(split_dir.name, split_dir.parent.name)
+        dataset = params['dataset']
+        params['model_save_path'] = './ultragcn_{}.pt'.format(params['dataset'])
+    if valid_file_path is None:
+        valid_file_path = test_file_path
+
+    # Keep ID mappings consistent across all splits and remove gaps in raw IDs.
+    all_splits = [load_interactions(path) for path in
+                  (train_file_path, valid_file_path, test_file_path)]
+    user_ids = sorted({u for split in all_splits for u, _ in split})
+    item_ids = sorted({i for split in all_splits for _, i in split})
+    user_mapping = {raw_id: index for index, raw_id in enumerate(user_ids)}
+    item_mapping = {raw_id: index for index, raw_id in enumerate(item_ids)}
+
     # dataset processing
-    train_data, test_data, train_mat, user_num, item_num, constraint_mat = load_data(train_file_path, test_file_path)
-    train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle = True, num_workers=5)
-    test_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle=False, num_workers=5)
+    train_data, valid_data, train_mat, user_num, item_num, constraint_mat = load_data(
+        train_file_path, valid_file_path, extra_file_paths=[test_file_path],
+        user_mapping=user_mapping, item_mapping=item_mapping
+    )
+    test_data = load_interactions(test_file_path, user_mapping, item_mapping)
+    train_loader = data.DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=0)
+    valid_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle=False, num_workers=0)
+    test_loader = data.DataLoader(list(range(user_num)), batch_size=test_batch_size, shuffle=False, num_workers=0)
 
     params['user_num'] = user_num
     params['item_num'] = item_num
@@ -122,6 +193,9 @@ def data_param_prepare(config_file):
         interacted_items[u].append(i)
 
     # test user-item interaction, which is ground truth
+    valid_ground_truth_list = [[] for _ in range(user_num)]
+    for (u, i) in valid_data:
+        valid_ground_truth_list[u].append(i)
     test_ground_truth_list = [[] for _ in range(user_num)]
     for (u, i) in test_data:
         test_ground_truth_list[u].append(i)
@@ -138,7 +212,9 @@ def data_param_prepare(config_file):
         pstore(ii_neighbor_mat, ii_neigh_mat_path)
         pstore(ii_constraint_mat, ii_cons_mat_path)
 
-    return params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, test_loader, mask, test_ground_truth_list, interacted_items
+    return (params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader,
+            valid_loader, valid_ground_truth_list, test_loader, test_ground_truth_list,
+            mask, interacted_items)
 
 
 def get_ii_constraint_mat(train_mat, num_neighbors, ii_diagonal_zero = False):
@@ -152,7 +228,10 @@ def get_ii_constraint_mat(train_mat, num_neighbors, ii_diagonal_zero = False):
     items_D = np.sum(A, axis = 0).reshape(-1)
     users_D = np.sum(A, axis = 1).reshape(-1)
 
-    beta_uD = (np.sqrt(users_D + 1) / users_D).reshape(-1, 1)
+    beta_uD = np.divide(
+        np.sqrt(users_D + 1), users_D,
+        out=np.zeros_like(users_D, dtype=np.float32), where=users_D > 0
+    ).reshape(-1, 1)
     beta_iD = (1 / np.sqrt(items_D + 1)).reshape(1, -1)
     all_ii_constraint_mat = torch.from_numpy(beta_uD.dot(beta_iD))
     for i in range(n_items):
@@ -167,7 +246,25 @@ def get_ii_constraint_mat(train_mat, num_neighbors, ii_diagonal_zero = False):
     return res_mat.long(), res_sim_mat.float()
 
     
-def load_data(train_file, test_file):
+def load_interactions(path, user_mapping=None, item_mapping=None):
+    """Read UltraGCN's user followed by space-separated item IDs format."""
+    interactions = []
+    with open(path, 'r') as f:
+        for line in f:
+            fields = line.strip().split()
+            if len(fields) > 1:
+                raw_uid = int(fields[0])
+                uid = user_mapping[raw_uid] if user_mapping is not None else raw_uid
+                for raw_item in fields[1:]:
+                    item = int(raw_item)
+                    if item_mapping is not None:
+                        item = item_mapping[item]
+                    interactions.append((uid, item))
+    return interactions
+
+
+def load_data(train_file, test_file, extra_file_paths=None,
+              user_mapping=None, item_mapping=None):
     trainUniqueUsers, trainItem, trainUser = [], [], []
     testUniqueUsers, testItem, testUser = [], [], []
     n_user, m_item = 0, 0
@@ -175,9 +272,11 @@ def load_data(train_file, test_file):
     with open(train_file, 'r') as f:
         for l in f.readlines():
             if len(l) > 0:
-                l = l.strip('\n').split(' ')
-                items = [int(i) for i in l[1:]]
-                uid = int(l[0])
+                l = l.split()
+                if not l:
+                    continue
+                items = [item_mapping[int(i)] if item_mapping is not None else int(i) for i in l[1:]]
+                uid = user_mapping[int(l[0])] if user_mapping is not None else int(l[0])
                 trainUniqueUsers.append(uid)
                 trainUser.extend([uid] * len(items))
                 trainItem.extend(items)
@@ -191,12 +290,14 @@ def load_data(train_file, test_file):
     with open(test_file) as f:
         for l in f.readlines():
             if len(l) > 0:
-                l = l.strip('\n').split(' ')
+                l = l.split()
+                if not l:
+                    continue
                 try:
-                    items = [int(i) for i in l[1:]]
+                    items = [item_mapping[int(i)] if item_mapping is not None else int(i) for i in l[1:]]
                 except:
                     items = []
-                uid = int(l[0])
+                uid = user_mapping[int(l[0])] if user_mapping is not None else int(l[0])
                 testUniqueUsers.append(uid)
                 testUser.extend([uid] * len(items))
                 testItem.extend(items)
@@ -206,6 +307,13 @@ def load_data(train_file, test_file):
                     m_item = m_item
                 n_user = max(n_user, uid)
                 testDataSize += len(items)
+
+    # Keep the embedding tables large enough for IDs that occur only in a
+    # held-out split. Such IDs are not added to the training graph.
+    for extra_path in extra_file_paths or []:
+        for uid, item in load_interactions(extra_path, user_mapping, item_mapping):
+            n_user = max(n_user, uid)
+            m_item = max(m_item, item)
 
     train_data = []
     test_data = []
@@ -227,7 +335,10 @@ def load_data(train_file, test_file):
     items_D = np.sum(train_mat, axis = 0).reshape(-1)
     users_D = np.sum(train_mat, axis = 1).reshape(-1)
 
-    beta_uD = (np.sqrt(users_D + 1) / users_D).reshape(-1, 1)
+    beta_uD = np.divide(
+        np.sqrt(users_D + 1), users_D,
+        out=np.zeros_like(users_D, dtype=np.float32), where=users_D > 0
+    ).reshape(-1, 1)
     beta_iD = (1 / np.sqrt(items_D + 1)).reshape(1, -1)
 
     constraint_mat = {"beta_uD": torch.from_numpy(beta_uD).reshape(-1),
@@ -246,6 +357,36 @@ def pstore(x, path):
 	with open(path, 'wb') as f:
 		pickle.dump(x, f)
 	print('store object in path = {} ok'.format(path))
+
+
+def validation_config_key(config_file, dataset, seed, split_dir, hyperparameters=None):
+    """Fingerprint the INI hyperparameters and the requested data run."""
+    digest = hashlib.sha256()
+    digest.update(Path(config_file).read_bytes())
+    run_options = {
+        'dataset': dataset,
+        'seed': seed,
+        'split_dir': str(Path(split_dir).resolve()) if split_dir else None,
+        'hyperparameters': hyperparameters or {},
+        'search_epochs': 20,
+    }
+    if split_dir:
+        split_digest = hashlib.sha256()
+        for filename in ('train.txt', 'val.txt', 'test.txt'):
+            split_digest.update((Path(split_dir) / filename).read_bytes())
+        run_options['split_digest'] = split_digest.hexdigest()
+    digest.update(json.dumps(run_options, sort_keys=True).encode('utf-8'))
+    return digest.hexdigest()[:16]
+
+
+def append_result(results_dir, filename, dataset, seed, metrics, hyperparameters):
+    os.makedirs(results_dir, exist_ok=True)
+    result_path = os.path.join(results_dir, filename)
+    with open(result_path, 'a', encoding='utf-8') as output:
+        output.write('{} | {} | {} | {}\n'.format(
+            dataset, seed, json.dumps(metrics, sort_keys=True),
+            json.dumps(hyperparameters, sort_keys=True)))
+    print('[RESULTS] appended to {}'.format(result_path))
 
 
 def Sampling(pos_train_data, item_num, neg_ratio, interacted_items, sampling_sift_pos):
@@ -290,8 +431,13 @@ class UltraGCN(nn.Module):
         self.item_embeds = nn.Embedding(self.item_num, self.embedding_dim)
 
         self.constraint_mat = constraint_mat
-        self.ii_constraint_mat = ii_constraint_mat
-        self.ii_neighbor_mat = ii_neighbor_mat
+        # These lookup tensors are indexed by CUDA batch IDs during training.
+        # Keep them on the model device before indexing (moving the result
+        # after indexing is too late when the indices are on CUDA).
+        device = params['device']
+        self.constraint_mat = {key: value.to(device) for key, value in constraint_mat.items()}
+        self.ii_constraint_mat = ii_constraint_mat.to(device)
+        self.ii_neighbor_mat = ii_neighbor_mat.to(device)
 
         self.initial_weight = params['initial_weight']
         self.initial_weights()
@@ -377,9 +523,10 @@ class UltraGCN(nn.Module):
 
 ########################### TRAINING #####################################
 
-def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_list, interacted_items, params): 
+def train(model, optimizer, train_loader, valid_loader, valid_ground_truth_list, mask, interacted_items, params):
     device = params['device']
-    best_epoch, best_recall, best_ndcg = 0, 0, 0
+    best_epoch, best_recall, best_ndcg = 0, -float('inf'), 0
+    best_valid_result = None
     early_stop_count = 0
     early_stop = False
 
@@ -412,13 +559,12 @@ def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_l
         if params['enable_tensorboard']:
             writer.add_scalar("Loss/train_epoch", loss, epoch)
 
-        need_test = True
-        if epoch < 50 and epoch % 5 != 0:
-            need_test = False
+        need_test = ((epoch + 1) % max(1, params.get('eval_interval', 10)) == 0
+                     or epoch + 1 == params['max_epoch'])
             
         if need_test:
             start_time = time.time()
-            F1_score, Precision, Recall, NDCG = test(model, test_loader, test_ground_truth_list, mask, params['topk'], params['user_num'])
+            F1_score, Precision, Recall, NDCG = test(model, valid_loader, valid_ground_truth_list, mask, params['topk'], params['user_num'])
             if params['enable_tensorboard']:
                 writer.add_scalar('Results/recall@20', Recall, epoch)
                 writer.add_scalar('Results/ndcg@20', NDCG, epoch)
@@ -427,8 +573,14 @@ def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_l
             print('The time for epoch {} is: train time = {}, test time = {}'.format(epoch, train_time, test_time))
             print("Loss = {:.5f}, F1-score: {:5f} \t Precision: {:.5f}\t Recall: {:.5f}\tNDCG: {:.5f}".format(loss.item(), F1_score, Precision, Recall, NDCG))
 
-            if Recall > best_recall:
+            if best_valid_result is None or Recall > best_recall:
                 best_recall, best_ndcg, best_epoch = Recall, NDCG, epoch
+                best_valid_result = {
+                    'f1': F1_score,
+                    'precision': Precision,
+                    'recall': Recall,
+                    'ndcg': NDCG,
+                }
                 early_stop_count = 0
                 torch.save(model.state_dict(), params['model_save_path'])
 
@@ -445,9 +597,15 @@ def train(model, optimizer, train_loader, test_loader, mask, test_ground_truth_l
             print('The best model is saved at {}'.format(params['model_save_path']))
             break
 
-    writer.flush()
+    if params['enable_tensorboard']:
+        writer.flush()
+        writer.close()
 
+    print('Best validation epoch = {}, Recall@{} = {:.5f}, NDCG@{} = {:.5f}'.format(
+        best_epoch, params['topk'], best_recall, params['topk'], best_ndcg
+    ))
     print('Training end!')
+    return best_valid_result
 
 
 ########################### TESTING #####################################
@@ -544,12 +702,15 @@ def test(model, test_loader, test_ground_truth_list, mask, topk, n_user):
             batch_users = batch_users.to(model.get_device())
             rating = model.test_foward(batch_users) 
             rating = rating.cpu()
-            rating += mask[batch_users]
+            # The evaluation mask remains on CPU; index it with CPU IDs after
+            # the scores have been copied back from the model device.
+            batch_users_cpu = batch_users.cpu()
+            rating += mask[batch_users_cpu]
             
             _, rating_K = torch.topk(rating, k=topk)
             rating_list.append(rating_K)
 
-            groundTrue_list.append([test_ground_truth_list[u] for u in batch_users])
+            groundTrue_list.append([test_ground_truth_list[u] for u in batch_users_cpu])
 
     X = zip(rating_list, groundTrue_list)
     Recall, Precision, NDCG = 0, 0, 0
@@ -570,22 +731,147 @@ def test(model, test_loader, test_ground_truth_list, mask, topk, n_user):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config_file', type=str, help='config file path')
+    parser.add_argument('--config_file', type=str, default=None, help='config file path')
+    parser.add_argument('--dataset', type=str, default=None,
+                        help='Split dataset name, for example amazon-electronics or lastfm')
+    parser.add_argument('--split_root', type=str, default=None,
+                        help='Parent directory containing seed folders')
+    parser.add_argument('--seed_folder', type=str, default=None,
+                        help='Optional explicit split folder; defaults to 00_dataset_seed_<seed>')
+    parser.add_argument('--seed', type=int, default=2026,
+                        help='Random seed for Python, NumPy, and PyTorch')
+    parser.add_argument('--gpu_ID', type=int, default=0,
+                        help='Physical GPU ID to use; use -1 to force CPU')
+    parser.add_argument('--split_dir', type=str, default=None,
+                        help='Directory containing train.txt, val.txt, and test.txt')
     args = parser.parse_args()
 
+    # Set visibility before the first CUDA availability/device query.
+    os.environ['CUDA_VISIBLE_DEVICES'] = '' if args.gpu_ID < 0 else str(args.gpu_ID)
+
+    set_seed(args.seed)
+    print('>>SEED:', args.seed)
+
+    repo_dir = Path(__file__).resolve().parent
+    if args.config_file is None:
+        if args.dataset == 'amazon-electronics':
+            config_name = 'ultragcn_amazonelectronics_m1.ini'
+        elif args.dataset == 'amazon-CD':
+            config_name = 'ultragcn_amazoncds_m1.ini'
+        elif args.dataset == 'amazon-book':
+            config_name = 'ultragcn_amazonbooks_m1.ini'
+        elif args.dataset == 'movielens':
+            config_name = 'ultragcn_movielens1m_m1.ini'
+        elif args.dataset == 'yelp2018':
+            config_name = 'ultragcn_yelp18_m1.ini'
+        else:
+            # Hyperparameters from the shipped Gowalla recipe are a starting
+            # point for split datasets without a dedicated UltraGCN recipe.
+            config_name = 'ultragcn_gowalla_m1.ini'
+        args.config_file = str(repo_dir / 'config' / config_name)
+    if args.split_dir is None and args.dataset is not None:
+        split_root = Path(args.split_root) if args.split_root else repo_dir.parent / 'data' / 'split_dataset'
+        seed_folder = args.seed_folder or '00_dataset_seed_{}'.format(args.seed)
+        args.split_dir = str(split_root / seed_folder / args.dataset)
+
     print('###################### UltraGCN ######################')
+    result_dataset = args.dataset or Path(args.split_dir).name
+    results_dir = repo_dir / 'results'
+    trial_cache_path = results_dir / 'search_trials.jsonl'
+    cached_trials = {}
+    if trial_cache_path.is_file():
+        for line in trial_cache_path.read_text(encoding='utf-8').splitlines():
+            try:
+                row = json.loads(line)
+                cached_trials[row['config_key']] = row['validation_results']
+            except (json.JSONDecodeError, KeyError):
+                continue
 
-    print('Loading Configuration...')
-    params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader, test_loader, mask, test_ground_truth_list, interacted_items = data_param_prepare(args.config_file)
-    
-    print('Load Configuration OK, show them below')
-    print('Configuration:')
-    print(params)
+    grid = [(dim, gamma, lambda_) for dim in (32, 64, 128)
+            for gamma in (5e-5, 1e-4) for lambda_ in (5e-4, 1.0, 2.75)]
+    best_params, best_valid_result, best_recall = None, None, None
+    for embedding_dim, gamma, lambda_ in grid:
+        hyperparameters = {
+            'embedding_dim': embedding_dim, 'gamma': gamma, 'lambda': lambda_
+        }
+        config_key = validation_config_key(
+            args.config_file, result_dataset, args.seed, args.split_dir,
+            hyperparameters,
+        )
+        validation_result = cached_trials.get(config_key)
+        if validation_result is None:
+            print('[SEARCH] UltraGCN validation trial: {}'.format(hyperparameters))
+            set_seed(args.seed)
+            overrides = {
+                'Model': {'embedding_dim': embedding_dim, 'max_epoch': 20},
+                'Training': {
+                    'gamma': gamma, 'lambda': lambda_, 'early_stop_epoch': 20,
+                    'eval_interval': 10,
+                },
+            }
+            (params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader,
+             valid_loader, valid_truth, _, _, mask, interacted_items) = data_param_prepare(
+                args.config_file, args.split_dir, args.gpu_ID, overrides
+            )
+            print('Trial configuration:', params)
+            model = UltraGCN(params, constraint_mat, ii_constraint_mat, ii_neighbor_mat).to(params['device'])
+            optimizer = torch.optim.Adam(model.parameters(), lr=params['lr'])
+            validation_result = train(
+                model, optimizer, train_loader, valid_loader, valid_truth,
+                mask, interacted_items, params,
+            )
+            trial_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with trial_cache_path.open('a', encoding='utf-8') as output:
+                output.write(json.dumps({
+                    'config_key': config_key, 'hyperparameters': hyperparameters,
+                    'validation_results': validation_result,
+                }, sort_keys=True) + '\n')
+            del model, optimizer, params, constraint_mat, ii_constraint_mat
+            del ii_neighbor_mat, train_loader, valid_loader, valid_truth
+            del mask, interacted_items
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        else:
+            print('[CACHE] using UltraGCN validation trial: {}'.format(hyperparameters))
+        recall = float(validation_result['recall'])
+        if best_recall is None or recall > best_recall:
+            best_params, best_valid_result, best_recall = hyperparameters, validation_result, recall
 
-    ultragcn = UltraGCN(params, constraint_mat, ii_constraint_mat, ii_neighbor_mat)
-    ultragcn = ultragcn.to(params['device'])
+    print('[SEARCH] best Recall@20={:.6f}, params={}'.format(best_recall, best_params))
+    append_result(str(results_dir), 'hyperparameter_search.txt', result_dataset,
+                  args.seed, best_valid_result, best_params)
+
+    # Retrain the selected configuration from scratch, validating every 10 epochs.
+    set_seed(args.seed)
+    full_overrides = {
+        'Model': {'embedding_dim': best_params['embedding_dim']},
+        'Training': {
+            'gamma': best_params['gamma'], 'lambda': best_params['lambda'],
+            'early_stop_epoch': 20, 'eval_interval': 10,
+        },
+    }
+    (params, constraint_mat, ii_constraint_mat, ii_neighbor_mat, train_loader,
+     valid_loader, valid_truth, test_loader, test_truth, mask,
+     interacted_items) = data_param_prepare(
+        args.config_file, args.split_dir, args.gpu_ID, full_overrides
+    )
+    print('Full training configuration:', params)
+    ultragcn = UltraGCN(params, constraint_mat, ii_constraint_mat, ii_neighbor_mat).to(params['device'])
     optimizer = torch.optim.Adam(ultragcn.parameters(), lr=params['lr'])
+    train(ultragcn, optimizer, train_loader, valid_loader, valid_truth,
+          mask, interacted_items, params)
 
-    train(ultragcn, optimizer, train_loader, test_loader, mask, test_ground_truth_list, interacted_items, params)
+    if os.path.exists(params['model_save_path']):
+        ultragcn.load_state_dict(torch.load(params['model_save_path'], map_location=params['device']))
+    F1_score, Precision, Recall, NDCG = test(
+        ultragcn, test_loader, test_truth, mask, params['topk'], params['user_num']
+    )
+    test_results = {'f1': F1_score, 'precision': Precision, 'recall': Recall, 'ndcg': NDCG}
+    print('Final test: F1-score: {:.5f}  Precision: {:.5f}  Recall: {:.5f}  NDCG: {:.5f}'.format(
+        F1_score, Precision, Recall, NDCG
+    ))
+    append_result(str(results_dir), 'test_results.txt', result_dataset, args.seed,
+                  test_results, best_params)
 
     print('END')

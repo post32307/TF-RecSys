@@ -15,6 +15,11 @@ import multiprocessing
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 args = parse_args()
+# --gpu_ID is a physical GPU ID. Mask to that device so model code can use
+# cuda:0 consistently; -1 disables CUDA. Scheduler children inherit their
+# assigned physical device through this same argument.
+if not args.single_run:
+    os.environ['CUDA_VISIBLE_DEVICES'] = '' if args.gpu_ID < 0 else str(args.gpu_ID)
 
 ROOT_PATH = os.path.normpath(join(os.path.dirname(os.path.abspath(__file__)), '..'))
 CODE_PATH = join(ROOT_PATH, 'code')
@@ -49,8 +54,9 @@ config['pretrain'] = args.pretrain
 config['A_split'] = False
 config['bigdata'] = False
 
-GPU = torch.cuda.is_available()
-device = torch.device('cuda' if GPU else "cpu")
+GPU = args.gpu_ID >= 0 and torch.cuda.is_available()
+device = torch.device('cuda:0' if GPU else "cpu")
+print(f">>GPU_ID: {args.gpu_ID}; device: {device}")
 CORES = multiprocessing.cpu_count() // 2
 seed = args.seed
 SPLIT_PATH = join(DATA_PATH, f"00_dataset_seed_{seed}")

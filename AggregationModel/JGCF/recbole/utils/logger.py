@@ -20,11 +20,18 @@ recbole.utils.logger
 
 import logging
 import os
-import colorlog
+try:
+    import colorlog
+except ModuleNotFoundError:
+    colorlog = None
 import re
 import hashlib
 from recbole.utils.utils import get_local_time, ensure_dir
-from colorama import init
+try:
+    from colorama import init
+except ModuleNotFoundError:
+    def init(*args, **kwargs):
+        return None
 
 log_colors_config = {
     "DEBUG": "cyan",
@@ -91,7 +98,10 @@ def init_logger(config):
 
     sfmt = "%(log_color)s%(asctime)-15s %(levelname)s  %(message)s"
     sdatefmt = "%d %b %H:%M"
-    sformatter = colorlog.ColoredFormatter(sfmt, sdatefmt, log_colors=log_colors_config)
+    if colorlog is None:
+        sformatter = logging.Formatter(sfmt.replace("%(log_color)s", ""), sdatefmt)
+    else:
+        sformatter = colorlog.ColoredFormatter(sfmt, sdatefmt, log_colors=log_colors_config)
     if config["state"] is None or config["state"].lower() == "info":
         level = logging.INFO
     elif config["state"].lower() == "debug":

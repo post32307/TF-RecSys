@@ -21,7 +21,23 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
+try:
+    from torch.utils.tensorboard import SummaryWriter
+except ModuleNotFoundError:
+    class SummaryWriter:
+        """No-op fallback when optional TensorBoard logging is unavailable."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def add_hparams(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            pass
 
 
 from recbole.utils.enum_type import ModelType
@@ -262,6 +278,13 @@ def get_flops(model, dataset, device, logger, transform, verbose=False):
     if model.__class__.__name__ == "Pop":
         return 1
 
+    try:
+        from thop.profile import register_hooks
+        from thop.vision.basic_hooks import count_parameters
+    except ModuleNotFoundError:
+        logger.warning("Skipping FLOPs profiling because optional package thop is not installed.")
+        return 0
+
     import copy
 
     model = copy.deepcopy(model)
@@ -293,9 +316,6 @@ def get_flops(model, dataset, device, logger, transform, verbose=False):
     inter = dataset[torch.tensor([1])].to(device)
     inter = transform(dataset, inter)
     inputs = (inter,)
-    from thop.profile import register_hooks
-    from thop.vision.basic_hooks import count_parameters
-
     handler_collection = {}
     fn_handles = []
     params_handles = []

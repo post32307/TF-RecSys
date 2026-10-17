@@ -20,7 +20,10 @@ import sys
 
 import pickle
 import pandas as pd
-from ray import tune
+try:
+    from ray import tune
+except ModuleNotFoundError:  # Ray is only needed for hyperparameter search.
+    tune = None
 
 from recbole.config import Config
 from recbole.data import (
@@ -41,7 +44,8 @@ from recbole.utils import (
 
 
 def run_recbole(
-    model=None, dataset=None, config_file_list=None, config_dict=None, saved=True
+    model=None, dataset=None, config_file_list=None, config_dict=None, saved=True,
+    evaluate_test=True,
 ):
     r"""A fast running api, which includes the complete process of
     training and testing a model on a specified dataset
@@ -52,6 +56,7 @@ def run_recbole(
         config_file_list (list, optional): Config files used to modify experiment parameters. Defaults to ``None``.
         config_dict (dict, optional): Parameters dictionary used to modify experiment parameters. Defaults to ``None``.
         saved (bool, optional): Whether to save the model. Defaults to ``True``.
+        evaluate_test (bool, optional): Evaluate the test split after fitting.
     """
     # configurations initialization
     config = Config(
@@ -121,12 +126,15 @@ def run_recbole(
     )
 
     # model evaluation
-    test_result = trainer.evaluate(
-        test_data, load_best_model=saved, show_progress=config["show_progress"]
-    )
+    test_result = None
+    if evaluate_test:
+        test_result = trainer.evaluate(
+            test_data, load_best_model=saved, show_progress=config["show_progress"]
+        )
 
     logger.info(set_color("best valid ", "yellow") + f": {best_valid_result}")
-    logger.info(set_color("test result", "yellow") + f": {test_result}")
+    if evaluate_test:
+        logger.info(set_color("test result", "yellow") + f": {test_result}")
 
     return {
         "best_valid_score": best_valid_score,
@@ -179,6 +187,8 @@ def objective_function(config_dict=None, config_file_list=None, saved=True):
     )
     test_result = trainer.evaluate(test_data, load_best_model=saved)
 
+    if tune is None:
+        raise ImportError("Ray is required only for hyperparameter tuning.")
     tune.report(**test_result)
     return {
         "model": model_name,
@@ -206,7 +216,9 @@ def load_data_and_model(model_file):
     """
     import torch
 
-    checkpoint = torch.load(model_file)
+    # RecBole model files contain serialized config objects as well as tensor
+    # weights. Only load checkpoints from trusted sources.
+    checkpoint = torch.load(model_file, weights_only=False)
     config = checkpoint["config"]
     init_seed(config["seed"], config["reproducibility"])
     init_logger(config)
