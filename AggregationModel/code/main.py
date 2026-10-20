@@ -85,9 +85,9 @@ try:
     TOP_CANDIDATES = world.ensemble_k
     # Number of per-model candidates retained from the individual validation searches before the ensemble search.
 
-    # a_sum_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
+    a_sum_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
     # a_sum_space = (0.0,) # Removing secondary model
-    a_sum_space = (1.0,) # Removing primary model
+    # a_sum_space = (1.0,) # Removing primary model
     # a_sum_space = (0.5,) # Simple Average
     # Ensemble scores are (1-a_sum) * Model_1 + a_sum * Model_2
 
@@ -296,6 +296,13 @@ try:
     if saved_ensemble is not None:
         if not set(ensemble_models).issubset(set(saved_ensemble)):
             saved_ensemble = None
+        elif ensemble_models == ["DAN", "SGFCF"] and not all(
+                isinstance(saved_ensemble.get(name), list) and
+                len(saved_ensemble[name]) >= TOP_CANDIDATES
+                for name in ("SGFCF", "DAN")):
+            # Older SGFCF+DAN entries stored only one parameter set per model.
+            # They cannot represent the requested top-K ensemble.
+            saved_ensemble = None
     if isinstance(saved_sg, list) and len(saved_sg) >= TOP_CANDIDATES:
         world.cprint(f"Found saved SGFCF top-{TOP_CANDIDATES} parameters; skipping SGFCF search.")
     if isinstance(saved_dan, list) and len(saved_dan) >= TOP_CANDIDATES:
@@ -496,30 +503,36 @@ try:
             best_sg_result, best_dan_result = top_sg[0][2], top_dan[0][2]
             if saved_ensemble is not None:
                 best_a_sum = float(saved_ensemble["a_sum"])
-                best_sg = dict(saved_ensemble["SGFCF"])
-                best_dan = dict(saved_ensemble["DAN"])
+                best_sg = [dict(params) for params in saved_ensemble["SGFCF"][:TOP_CANDIDATES]]
+                best_dan = [dict(params) for params in saved_ensemble["DAN"][:TOP_CANDIDATES]]
                 best_result = None
             else:
-                # Keep DAN outermost so each DAN score matrix is built once
-                # and reused across all retained SGFCF candidates.
-                for _, dan_params, _ in top_dan:
-                    dan_scores = search_model.S_DAN(**dan_params, cache=cache)
-                    for _, sg_params, _ in top_sg:
-                        sg_scores = search_model.S_SGFCF(**sg_params, cache=cache)
-                        for a_sum in a_sum_space:
-                            ensemble = (float(a_sum) * sg_scores +
-                                        (1.0 - float(a_sum)) * dan_scores)
-                            result = metric(ensemble, search_model, search_dataset)
-                            score = float(result["recall"][0])
-                            if score > best_score:
-                                best_score = score
-                                best_a_sum = a_sum
-                                best_result = result
-                                best_sg = dict(sg_params)
-                                best_dan = dict(dan_params)
-                            del ensemble
-                        del sg_scores
-                    del dan_scores
+                sg_candidates = [dict(params) for _, params, _ in top_sg]
+                dan_candidates = [dict(params) for _, params, _ in top_dan]
+                mean_sg = None
+                for params in sg_candidates:
+                    scores = search_model.S_SGFCF(**params, cache=cache)
+                    mean_sg = scores if mean_sg is None else mean_sg + scores
+                    del scores
+                mean_sg /= len(sg_candidates)
+                mean_dan = None
+                for params in dan_candidates:
+                    scores = search_model.S_DAN(**params, cache=cache)
+                    mean_dan = scores if mean_dan is None else mean_dan + scores
+                    del scores
+                mean_dan /= len(dan_candidates)
+                for a_sum in a_sum_space:
+                    ensemble = (float(a_sum) * mean_sg +
+                                (1.0 - float(a_sum)) * mean_dan)
+                    result = metric(ensemble, search_model, search_dataset)
+                    score = float(result["recall"][0])
+                    if score > best_score:
+                        best_score = score
+                        best_a_sum = a_sum
+                        best_result = result
+                    del ensemble
+                best_sg, best_dan = sg_candidates, dan_candidates
+                del mean_sg, mean_dan
                 save_best_parameters(
                     ensemble_key,
                     {"a_sum": best_a_sum, "SGFCF": best_sg, "DAN": best_dan},
@@ -617,8 +630,10 @@ try:
                 del mean_scores
                 save_best_parameters(ensemble_key, generic_best)
     else:
-        saved_sg_default = saved_sg[0] if isinstance(saved_sg, list) else saved_sg
-        saved_dan_default = saved_dan[0] if isinstance(saved_dan, list) else saved_dan
+        saved_sg_default = (saved_sg[:TOP_CANDIDATES] if isinstance(saved_sg, list)
+                            else ([saved_sg] if saved_sg else []))
+        saved_dan_default = (saved_dan[:TOP_CANDIDATES] if isinstance(saved_dan, list)
+                             else ([saved_dan] if saved_dan else []))
         best_sg = saved_sg_default or {
             "beta_1": 1.0, "beta_2": 1.0, "alpha": 0.0,
             "eps": 0.5, "gamma": 1.0,
@@ -634,8 +649,8 @@ try:
             best_a_sum = generic_best["a_sum"]
         elif saved_ensemble is not None:
             best_a_sum = float(saved_ensemble["a_sum"])
-            best_sg = dict(saved_ensemble["SGFCF"])
-            best_dan = dict(saved_ensemble["DAN"])
+            best_sg = [dict(params) for params in saved_ensemble["SGFCF"][:TOP_CANDIDATES]]
+            best_dan = [dict(params) for params in saved_ensemble["DAN"][:TOP_CANDIDATES]]
         else:
             best_a_sum = 0.5
         best_result = None
@@ -664,8 +679,20 @@ try:
         test_scores = model.LinearScoreMatrix(first_test, second_test, generic_best["a_sum"])
         del first_test, second_test
     else:
-        sg_test = Recmodel.S_SGFCF(**best_sg, cache=cache)
-        dan_test = Recmodel.S_DAN(**best_dan, cache=cache)
+        sg_candidates = best_sg if isinstance(best_sg, list) else [best_sg]
+        dan_candidates = best_dan if isinstance(best_dan, list) else [best_dan]
+        sg_test = None
+        for params in sg_candidates:
+            scores = Recmodel.S_SGFCF(**params, cache=cache)
+            sg_test = scores if sg_test is None else sg_test + scores
+            del scores
+        sg_test /= len(sg_candidates)
+        dan_test = None
+        for params in dan_candidates:
+            scores = Recmodel.S_DAN(**params, cache=cache)
+            dan_test = scores if dan_test is None else dan_test + scores
+            del scores
+        dan_test /= len(dan_candidates)
         test_scores = float(best_a_sum) * sg_test + (1.0 - float(best_a_sum)) * dan_test
     test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
     # Update both freshly searched and resumed ensembles after testing.
