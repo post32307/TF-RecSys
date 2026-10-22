@@ -117,16 +117,37 @@ try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             handle.seek(0)
             for line in handle:
-                parts = line.rstrip("\n").split(" : ", 3)
-                if len(parts) == 4:
-                    entries[(parts[0].strip(), parts[1].strip(), parts[2].strip())] = parts[3].strip()
+                parts = line.rstrip("\n").split(" : ", 5)
+                if len(parts) >= 4:
+                    row_key = (parts[0].strip(), parts[1].strip(), parts[2].strip())
+                    if row_key[2] == "test_time_seconds":
+                        continue
+                    tail = [part.strip() for part in parts[3:]]
+                    # Preserve the time, parameters, and results fields when
+                    # this writer rewrites the file for another model.
+                    if len(tail) >= 3 and tail[0].replace(".", "", 1).isdigit():
+                        entries[row_key] = {
+                            "time": tail[0], "parameters": tail[1],
+                            "results": " : ".join(tail[2:]),
+                        }
+                    elif len(tail) == 1 and tail[0].replace(".", "", 1).isdigit():
+                        entries[row_key] = {"time": tail[0], "parameters": None, "results": None}
+                    elif len(tail) == 2 and tail[1].startswith("Precision "):
+                        entries[row_key] = {
+                            "time": None, "parameters": tail[0], "results": tail[1],
+                        }
+                    else:
+                        entries[row_key] = {"time": None, "parameters": " : ".join(tail), "results": None}
                 elif len(parts) == 3:
-                    entries[(parts[0].strip(), parts[1].strip(), parts[2].strip())] = None
+                    entries[(parts[0].strip(), parts[1].strip(), parts[2].strip())] = {
+                        "time": None, "parameters": None, "results": None,
+                    }
             # Migrate the old unqualified ensemble entry once a pair-specific
             # key is written; otherwise it would remain as a stale duplicate.
             if model_name.startswith("ensemble:"):
                 entries.pop((dataset_name, seed_name, "ensemble"), None)
-            entries[key] = None if parameters is None else repr(parameters)
+            entry = entries.get(key, {"time": None, "parameters": None, "results": None})
+            entry["parameters"] = None if parameters is None else repr(parameters)
             if test_results is not None:
                 def format_metric(name):
                     values = np.asarray(test_results[name]).reshape(-1)
@@ -135,11 +156,12 @@ try:
                     # Preserve every cutoff, in world.topks order.
                     return repr([float(value) for value in values])
 
-                entries[key] += (
-                    f" : Precision {format_metric('precision')}"
+                entry["results"] = (
+                    f"Precision {format_metric('precision')}"
                     f" / Recall {format_metric('recall')}"
                     f" / NDCG {format_metric('ndcg')}"
                 )
+            entries[key] = entry
             model_order = {"SGFCF": 1, "DAN": 2, "ensemble": 3}
             seed_order = {"2020": 0, "2026": 1, "42": 2}
             ordered = sorted(
@@ -164,20 +186,58 @@ try:
             handle.seek(0)
             handle.truncate()
             for (dataset_key, seed_key, model_key), value in model_entries:
-                if value is None:
-                    handle.write(f"{dataset_key} : {seed_key} : {model_key}\n")
-                else:
-                    handle.write(f"{dataset_key} : {seed_key} : {model_key} : {value}\n")
+                handle.write(format_parameter_entry(dataset_key, seed_key, model_key, value))
             if model_entries and ensemble_entries:
                 handle.write("\n")
             for (dataset_key, seed_key, model_key), value in ensemble_entries:
-                if value is None:
-                    handle.write(f"{dataset_key} : {seed_key} : {model_key}\n")
-                else:
-                    handle.write(f"{dataset_key} : {seed_key} : {model_key} : {value}\n")
+                handle.write(format_parameter_entry(dataset_key, seed_key, model_key, value))
             handle.flush()
             os.fsync(handle.fileno())
             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+    def format_parameter_entry(dataset_key, seed_key, model_key, value):
+        fields = [dataset_key, seed_key, model_key]
+        if value["time"] is not None:
+            fields.append(value["time"])
+        if value["parameters"] is not None:
+            fields.append(value["parameters"])
+        if value["results"] is not None:
+            fields.append(value["results"])
+        return " : ".join(fields) + "\n"
+
+    def save_test_time(seconds):
+        """Store runtime in the ensemble's existing parameter/result row."""
+        seed_name = str(world.seed)
+        with open(params_file, "a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                updated = []
+                found = False
+                for line in handle.readlines():
+                    parts = line.rstrip("\n").split(" : ", 5)
+                    if len(parts) >= 3 and tuple(p.strip() for p in parts[:3]) == (
+                        dataset_name, seed_name, ensemble_key
+                    ):
+                        found = True
+                        tail = [p.strip() for p in parts[3:]]
+                        if tail and tail[0].replace(".", "", 1).isdigit():
+                            tail = tail[1:]
+                        line = " : ".join(parts[:3] + [f"{float(seconds):.9f}"] + tail) + "\n"
+                    elif len(parts) >= 4 and parts[2].strip() == "test_time_seconds":
+                        continue
+                    updated.append(line)
+                if not found:
+                    updated.append(
+                        f"{dataset_name} : {seed_name} : {ensemble_key} : {float(seconds):.9f}\n"
+                    )
+                handle.seek(0)
+                handle.truncate()
+                handle.writelines(updated)
+                handle.flush()
+                os.fsync(handle.fileno())
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def load_saved_parameters():
         """Load saved parameters for the current dataset and seed."""
@@ -187,10 +247,14 @@ try:
         seed_name = str(world.seed)
         with open(params_file, "r", encoding="utf-8") as handle:
             for line in handle:
-                parts = line.rstrip("\n").split(" : ", 3)
-                if len(parts) != 4:
+                parts = line.rstrip("\n").split(" : ", 5)
+                if len(parts) < 4:
                     continue
-                dataset_key, seed_key, model_key, value = (part.strip() for part in parts)
+                dataset_key, seed_key, model_key = (part.strip() for part in parts[:3])
+                tail = [part.strip() for part in parts[3:]]
+                if tail and tail[0].replace(".", "", 1).isdigit() and len(tail) > 1:
+                    tail = tail[1:]
+                value = " : ".join(tail)
                 if dataset_key != dataset_name or seed_key != seed_name:
                     continue
                 try:
@@ -661,6 +725,10 @@ try:
     # ---------------------------------------------------------
     # 3. Final test of the combined model
     # ---------------------------------------------------------
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    test_start = time.perf_counter()
+
     if generic_best is not None:
         first_model, second_model = ensemble_models
         first_candidates = generic_best[first_model]
@@ -695,6 +763,10 @@ try:
         dan_test /= len(dan_candidates)
         test_scores = float(best_a_sum) * sg_test + (1.0 - float(best_a_sum)) * dan_test
     test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
+    if torch.cuda.is_available():
+        torch.cuda.synchronize()
+    test_seconds = time.perf_counter() - test_start
+
     # Update both freshly searched and resumed ensembles after testing.
     # Do not mark unvalidated defaults from val_true=0 as a completed search.
     if val_true or saved_ensemble is not None:
@@ -722,7 +794,9 @@ try:
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
-    
+
+    save_test_time(test_seconds)
+    world.cprint(f"Final test phase time: {test_seconds:.6f} seconds")
 
 
 

@@ -13,6 +13,19 @@ def parse_args():
                  "GF-CF", "PGSP", "TurboCF"],
         help="Baseline models to score and plot (default: EASE SGFCF)",
     )
+    parser.add_argument(
+        "--model", choices=["EASE", "SGFCF", "BSPM", "ChebyCF", "DAN",
+                            "GF-CF", "PGSP", "TurboCF", "FaGSP", "HiGSP"],
+        default="EASE", help="Single model used by plot_pearson_within.py",
+    )
+    parser.add_argument(
+        "--parameter",
+        help="Model parameter to vary in plot_pearson_within.py",
+    )
+    parser.add_argument(
+        "--values", nargs="+", type=float,
+        help="Values to evaluate for --parameter",
+    )
     parser.add_argument("--k", type=int, default=64,
                         help="Spectral dimension used by SGFCF")
     parser.add_argument("--dataset", type=str, default="amazon-electronics",
