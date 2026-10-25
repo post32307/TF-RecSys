@@ -7,6 +7,7 @@ Mon Jul  6 08:37:39 2026 : TurboCF / yelp / alpha=0.5, power=1.0, filter=3
 Mon Jul  6 15:04:35 2026 : TurboCF / amazon-CD / alpha=0.1, power=0.5, filter=3
 Thu Jul 30 18:56:41 2026 : ChebyCF / amazon-electronics / K=8, phi=1.5, eta=256, alpha=0.1, beta=0.2
 Tue Aug  4 10:47:25 2026 : DAN / amazon-electronics / model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.2, drop_p=0.4
+Thu Oct 22 11:32:09 2026 : none
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------

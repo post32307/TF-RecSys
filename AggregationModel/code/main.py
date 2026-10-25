@@ -1,6 +1,6 @@
 import world
 import torch
-torch.set_num_threads(2)
+torch.set_num_threads(8)
 import os
 import sys
 import time

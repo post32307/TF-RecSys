@@ -21,9 +21,30 @@ __pycache__/
 **/code/Figures/**
 **/code/logs/**
 **/code/Results/**
+**/code/pearson_inter/**
+**/code/pearson_within/**
+**/code/plots/**
+**/code/etc/**
+**/code/__pycache__/**
+**/code/checkpoints/**
 **/LastFM is a very small dataset**
 
+
+**/JGCF/__pycache__/**
+**/JGCF/log/**
+**/JGCF/log_tensorboard/**
+**/JGCF/saved/**
 
 **/LightGCN-PyTorch/code/checkpoints/**
 **/LightGCN-PyTorch/code/runs/**
 **/LightGCN-PyTorch/code/__pycache__/**
+**/LightGCN-PyTorch/code/results/logs/**
+**/LightGCN-PyTorch/code/results/tmp/**
+
+**/TrainingFreeRecSys/__pycache__/**
+# Temporary model/cache artifacts
+**/temp/
+*.tmp
+*.npy.*
+
+#**//**

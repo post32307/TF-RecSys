@@ -7,6 +7,8 @@ Wed Jul  8 21:36:58 2026 : TurboCF / epinions / alpha=0.5, power=1.5, filter=3
 Sun Jul 12 17:11:26 2026 : BSPM / yelp2018 / solver_shr=rk4, K_s=1, T_s=2.5, final_sharpening=True, t_point_combination=False, idl_beta=0.2, factor_dim=32
 Thu Jul 30 20:02:13 2026 : ChebyCF / amazon-electronics / K=8, phi=1.5, eta=256, alpha=0.1, beta=0.2
 Wed Aug  5 00:31:50 2026 : DAN / amazon-electronics / model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.2, drop_p=0.4
+Thu Oct 22 11:32:08 2026 : none
+Thu Oct 22 14:47:11 2026 : none
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------

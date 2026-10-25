@@ -13,6 +13,8 @@ recbole.quick_start
 """
 import logging
 import torch
+from pathlib import Path
+from time import perf_counter
 from logging import getLogger
 
 import sys
@@ -41,6 +43,17 @@ from recbole.utils import (
     set_color,
     get_flops,
 )
+
+
+def _sync_cuda(device):
+    if torch.device(device).type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def _append_runtime_record(record):
+    runtime_file = Path(__file__).resolve().parents[2] / "runtime.txt"
+    with runtime_file.open("a", encoding="utf-8") as output:
+        output.write(record + "\n")
 
 
 def run_recbole(
@@ -128,8 +141,18 @@ def run_recbole(
     # model evaluation
     test_result = None
     if evaluate_test:
+        _sync_cuda(config["device"])
+        test_started_at = perf_counter()
         test_result = trainer.evaluate(
             test_data, load_best_model=saved, show_progress=config["show_progress"]
+        )
+        _sync_cuda(config["device"])
+        test_seconds = perf_counter() - test_started_at
+        _append_runtime_record(
+            f"stage=test model={config['model']} dataset={config['dataset']} "
+            f"seed={config['seed']} embedding_size={config['embedding_size']} "
+            f"n_layers={config['n_layers']} learning_rate={config['learning_rate']} "
+            f"reg_weight={config['reg_weight']} seconds={test_seconds:.6f}"
         )
 
     logger.info(set_color("best valid ", "yellow") + f": {best_valid_result}")

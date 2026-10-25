@@ -12,7 +12,6 @@ import plot_world
 
 sys.modules["world"] = plot_world
 
-CORRELATION_CMAP = [(0.0, "green"), (0.5, "red"), (1.0, "blue")]
 CORRELATION_MIN = -1.0
 CORRELATION_MAX = 1.0
 HEATMAP_FIGSIZE = (12, 12)
@@ -50,20 +49,25 @@ def product_configs(grid):
 def save_heatmap(correlations, labels, output_path, title):
     """Save a Pearson heatmap with a shared, fixed [-1, 1] scale."""
     import matplotlib.pyplot as plt
-    from matplotlib.colors import LinearSegmentedColormap
+    from matplotlib.colors import ListedColormap, Normalize
 
     figure, axis = plt.subplots(figsize=HEATMAP_FIGSIZE)
-    cmap = LinearSegmentedColormap.from_list(
-        "pearson_green_red_blue", CORRELATION_CMAP
-    )
+    cmap = ListedColormap(np.vstack([
+        plt.get_cmap("magma")(np.linspace(0, 1, 128)),
+        plt.get_cmap("viridis_r")(np.linspace(0, 1, 128)),
+    ]))
     image = axis.imshow(
         np.ma.masked_invalid(correlations), cmap=cmap,
         vmin=CORRELATION_MIN, vmax=CORRELATION_MAX,
     )
-    axis.set_xticks(np.arange(len(labels)), labels, rotation=90, fontsize=6)
-    axis.set_yticks(np.arange(len(labels)), labels, fontsize=6)
+    axis.set_xticks([])
+    axis.set_yticks([])
     axis.set_title(title, fontsize=16, fontweight="semibold", pad=14)
-    figure.colorbar(image, ax=axis, label="Pearson correlation",
+    positive_scale = plt.cm.ScalarMappable(
+        norm=Normalize(vmin=0, vmax=CORRELATION_MAX),
+        cmap="viridis_r",
+    )
+    figure.colorbar(positive_scale, ax=axis, label="Pearson correlation",
                     fraction=0.046, pad=0.04)
     if len(labels) <= 15:
         for row in range(len(labels)):

@@ -1,1 +1,0 @@
-(test) | amazon-electronics | seed=2020 | model=UltraGCN | config_key=dd5320b8606ff436 | f1=0.026815 | precision=0.014948 | recall=0.130117 | ndcg=0.070141 | split_path=/home/hakbeom/MainCodes/TF-RecSys/AggregationModel/data/split_dataset/00_dataset_seed_2020/amazon-electronics

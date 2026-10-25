@@ -17,6 +17,19 @@ Sun Aug  2 22:51:17 2026 : FaGSP / amazon-electronics / alpha1=0.3, alpha2=0.3, 
 Mon Aug  3 10:42:00 2026 : DAN / amazon-electronics / model=RLAE_DAN, reg_p=10.0, alpha=0.2, beta=0.2, drop_p=0.4
 Thu Aug 13 18:44:39 2026 : SGFCF / amazon-book / k=32, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
 Fri Aug 14 08:05:30 2026 : SGFCF / amazon-book / k=32, beta_1=1.0, beta_2=1.0, alpha=0.0, eps=0.5, gamma=1.0
+Thu Oct 22 11:32:07 2026 : none
+Thu Oct 22 11:32:45 2026 : none
+Thu Oct 22 22:12:52 2026 : none
+Thu Oct 22 22:47:37 2026 : none
+Thu Oct 22 23:30:47 2026 : none
+Fri Oct 23 00:01:36 2026 : none
+Fri Oct 23 01:21:21 2026 : none
+Fri Oct 23 01:49:14 2026 : FaGSP / epinions / alpha1=0.3, alpha2=0.5, q=0.7, order1=16, k1=64, k2=256
+Fri Oct 23 04:24:29 2026 : none
+Fri Oct 23 04:24:29 2026 : none
+Fri Oct 23 04:24:40 2026 : none
+Fri Oct 23 04:29:57 2026 : none
+Fri Oct 23 04:35:34 2026 : none
 ========================================================================================================================
 Model      | Dataset              | Metrics                                                      | Time     | Parameters
 ------------------------------------------------------------------------------------------------------------------------
@@ -4590,3 +4603,8 @@ SGFCF      | amazon-book          | (Val) Recall@20: 0.046, NDCG@20: 0.0281     
 SGFCF      | amazon-book          | (Val) Recall@20: 0.047, NDCG@20: 0.0289                      | 02:39    | k=256, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
 SGFCF      | amazon-book          | (Val) Recall@20: 0.0479, NDCG@20: 0.0294                     | 02:47    | k=512, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
 SGFCF      | amazon-book          | (Val) Recall@20: 0.0483, NDCG@20: 0.0297                     | 02:49    | k=1024, beta_1=2.5, beta_2=6.5, alpha=4.8, eps=0.5, gamma=0.025
+
+FaGSP      | epinions             | (Val) TIMEOUT                                                | 30:00.116 | alpha1=0.3, alpha2=0.5, q=0.7, order1=16, k1=64, k2=256
+FaGSP      | epinions             | (Val) TIMEOUT                                                | 30:00.115 | alpha1=0.3, alpha2=0.5, q=0.7, order1=16, k1=256, k2=128
+FaGSP      | epinions             | (Val) TIMEOUT                                                | 30:00.119 | alpha1=0.3, alpha2=0.5, q=0.7, order1=16, k1=256, k2=256
+FaGSP      | epinions             | (Val) TIMEOUT                                                | 30:00.117 | alpha1=0.3, alpha2=0.7, q=0.7, order1=8, k1=64, k2=128

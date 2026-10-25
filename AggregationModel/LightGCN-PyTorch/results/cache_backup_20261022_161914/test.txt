@@ -1,0 +1,11 @@
+(test) | lastfm               | seed=2020 | recall=[0.286128], precision=[0.033993], ndcg=[0.168718] | epochs=730 | parameters=(recdim=64, lr=0.001, decay=0.0001, layer=3, bpr_batch=2048, topks=[20]) | runtime=904.36s | split_path=../data/split_dataset/00_dataset_seed_2020/lastfm
+(error) | gowalla              | seed=2020 | runtime=6919.13s | split_path=../data/split_dataset/00_dataset_seed_2020/gowalla | log=results/logs/run_0001_gowalla_seed_2020.log
+(error) | yelp2018             | seed=2020 | runtime=6919.12s | split_path=../data/split_dataset/00_dataset_seed_2020/yelp2018 | log=results/logs/run_0002_yelp2018_seed_2020.log
+(error) | amazon-CD            | seed=2020 | runtime=6919.12s | split_path=../data/split_dataset/00_dataset_seed_2020/amazon-CD | log=results/logs/run_0003_amazon-CD_seed_2020.log
+(test) | amazon-electronics   | seed=2020 | recall=[0.128774], precision=[0.014564], ndcg=[0.065360] | epochs=180 | parameters=(recdim=64, lr=0.001, decay=0.0001, layer=3, bpr_batch=2048, topks=[20]) | runtime=245.55s | split_path=../data/split_dataset/00_dataset_seed_2020/amazon-electronics
+(test) | citeulike            | seed=2020 | recall=[0.261945], precision=[0.060070], ndcg=[0.178584] | epochs=940 | parameters=(recdim=64, lr=0.001, decay=0.0001, layer=3, bpr_batch=2048, topks=[20]) | runtime=3559.65s | split_path=../data/split_dataset/00_dataset_seed_2020/citeulike
+(error) | movielens            | seed=2020 | runtime=6919.12s | split_path=../data/split_dataset/00_dataset_seed_2020/movielens | log=results/logs/run_0006_movielens_seed_2020.log
+(error) | news                 | seed=2020 | runtime=6919.12s | split_path=../data/split_dataset/00_dataset_seed_2020/news | log=results/logs/run_0007_news_seed_2020.log
+(error) | douban-book          | seed=2020 | runtime=6669.06s | split_path=../data/split_dataset/00_dataset_seed_2020/douban-book | log=results/logs/run_0008_douban-book_seed_2020.log
+(error) | epinions             | seed=2020 | runtime=6009.95s | split_path=../data/split_dataset/00_dataset_seed_2020/epinions | log=results/logs/run_0009_epinions_seed_2020.log
+(error) | yelp                 | seed=2020 | runtime=3354.72s | split_path=../data/split_dataset/00_dataset_seed_2020/yelp | log=results/logs/run_0010_yelp_seed_2020.log

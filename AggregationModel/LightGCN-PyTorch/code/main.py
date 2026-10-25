@@ -83,6 +83,17 @@ def restore_state(recmodel, state):
         recmodel.load_state_dict(state)
 
 
+def sync_cuda():
+    if world.device.type == "cuda":
+        torch.cuda.synchronize(world.device)
+
+
+def log_runtime(record):
+    runtime_file = join(world.ROOT_PATH, "runtime.txt")
+    with open(runtime_file, "a", encoding="utf-8") as output:
+        output.write(record + "\n")
+
+
 def train_model(dataset, validation_dataset, recmodel, bpr, writer, save_weight_file=None):
     best_score = None
     best_epoch = None
@@ -93,8 +104,18 @@ def train_model(dataset, validation_dataset, recmodel, bpr, writer, save_weight_
 
     for epoch in range(world.TRAIN_epochs):
         completed_epochs = epoch + 1
+        sync_cuda()
+        epoch_started_at = time.perf_counter()
         output_information = Procedure.BPR_train_original(
             dataset, recmodel, bpr, epoch, neg_k=Neg_k, w=writer
+        )
+        sync_cuda()
+        epoch_seconds = time.perf_counter() - epoch_started_at
+        log_runtime(
+            f"stage=epoch_training model={world.model_name} dataset={world.dataset} "
+            f"seed={world.seed} epoch={epoch + 1} recdim={world.config['latent_dim_rec']} "
+            f"lr={world.config['lr']} decay={world.config['decay']} "
+            f"layers={world.config['lightGCN_n_layers']} seconds={epoch_seconds:.6f}"
         )
         print(f'EPOCH[{epoch + 1}/{world.TRAIN_epochs}] {output_information}')
 
@@ -148,6 +169,8 @@ def train_and_eval(params, test_eval_file, writer, save_weight_file=None):
     test_dataset = build_dataset(test_eval_file)
     recmodel, bpr = build_training_objects(train_dataset)
     maybe_load_weights(recmodel, save_weight_file)
+    sync_cuda()
+    training_started_at = time.perf_counter()
     validation_results, completed_epochs, best_epoch = train_model(
         train_dataset, validation_dataset, recmodel, bpr, writer, save_weight_file
     )
@@ -157,11 +180,28 @@ def train_and_eval(params, test_eval_file, writer, save_weight_file=None):
             validation_dataset, recmodel, world.TRAIN_epochs, writer, world.config['multicore']
         )
         best_epoch = completed_epochs
+    sync_cuda()
+    training_seconds = time.perf_counter() - training_started_at
+    log_runtime(
+        f"stage=full_training model={world.model_name} dataset={world.dataset} "
+        f"seed={world.seed} epochs={completed_epochs} best_epoch={best_epoch} "
+        f"recdim={recdim} lr={lr} decay={decay} layers={layer} "
+        f"seconds={training_seconds:.6f}"
+    )
     runtime = time.time() - run_start
     if test_eval_file == "val.txt":
         return validation_results, validation_results, completed_epochs, best_epoch, runtime
     cprint(f"[TEST:{test_eval_file}]")
+    sync_cuda()
+    test_started_at = time.perf_counter()
     test_results = Procedure.Test(test_dataset, recmodel, world.TRAIN_epochs, writer, world.config['multicore'])
+    sync_cuda()
+    test_seconds = time.perf_counter() - test_started_at
+    log_runtime(
+        f"stage=test model={world.model_name} dataset={world.dataset} seed={world.seed} "
+        f"split={test_eval_file} recdim={recdim} lr={lr} decay={decay} "
+        f"layers={layer} seconds={test_seconds:.6f}"
+    )
     runtime = time.time() - run_start
     return validation_results, test_results, completed_epochs, best_epoch, runtime
 

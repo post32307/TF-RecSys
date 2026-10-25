@@ -15,9 +15,6 @@ import multiprocessing
 
 import torch.nn as nn
 
-
-
-
 class LinearScoreMatrix:
     """Combine stored score matrices only for the users being evaluated."""
 
@@ -29,11 +26,9 @@ class LinearScoreMatrix:
         self.shape = first.shape
 
     def get_rows(self, users, device):
-        # Index on each source's device before transferring the small batch.
         first = self.first[torch.as_tensor(users, device=self.first.device)].to(device)
         second = self.second[torch.as_tensor(users, device=self.second.device)].to(device)
         return first * self.weight + second * (1.0 - self.weight)
-
 
 class TFmodel:
 
@@ -54,7 +49,6 @@ class TFmodel:
         self.D_inv = sp.diags(1. / rowsum) #CSR
     
 
-
     # Model Functions
 
     def S_SGFCF(self, beta_1=1.0, beta_2=1.0, alpha=0.0,
@@ -64,18 +58,12 @@ class TFmodel:
             self.k = int(k)
         degrees_u = np.asarray(self.R.sum(axis=1)).ravel()
         degrees_i = np.asarray(self.R.sum(axis=0)).ravel()
-        # Zero-degree users/items can occur after the train/validation split.
-        # In particular, alpha=0 with eps>0 would otherwise evaluate
-        # 0**(-eps) and inject inf values into the normalized matrix.
         with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
             user_scale = np.power(degrees_u + float(alpha), -float(eps))
             item_scale = np.power(degrees_i + float(alpha), -float(eps))
         user_scale[~np.isfinite(user_scale)] = 0.0
         item_scale[~np.isfinite(item_scale)] = 0.0
         norm_cache = None if cache is None else cache.setdefault("normalized", {})
-        # Validation and test loaders may infer slightly different dimensions
-        # when an ID appears only in one split.  Namespace cache entries by
-        # model instance so matrices with different shapes are never reused.
         model_key = id(self)
         norm_key = (model_key, float(alpha), float(eps))
         if norm_cache is not None and norm_key in norm_cache:
@@ -100,8 +88,6 @@ class TFmodel:
                 limit = int(cache.get("max_eigen_entries", 1))
                 while len(eigen_cache) >= limit:
                     eigen_cache.pop(next(iter(eigen_cache)))
-                # Keep the reusable eigenspace in host memory.  Only this
-                # candidate's copy is moved to the accelerator below.
                 eigen_cache[key] = (vectors.detach().cpu(), values.detach().cpu())
         hu_cpu, hi_cpu = self.compute_homophily()
         hu = hu_cpu.to(self.device)
@@ -118,8 +104,6 @@ class TFmodel:
             denominator[denominator == 0] = 1.0
             scores[start:stop].copy_((batch / denominator).cpu())
             del batch
-        # The eigenspace may remain in the cache, but these intermediate GPU
-        # tensors are no longer needed after the graph score is formed.
         del weighted, response
         if float(gamma) != 0.0:
             conv_cache = None if cache is None else cache.setdefault("convolution", {})
@@ -140,7 +124,6 @@ class TFmodel:
                         conv_cache.pop(next(iter(conv_cache)))
                     conv_cache[norm_key] = conv
             scores = scores + float(gamma) * conv
-            # Do not delete the cached tensor; only release the local alias.
             if conv_cache is None:
                 del conv
         if norm_cache is None:
@@ -235,13 +218,6 @@ class TFmodel:
     def S_ChebyCF(self, K=8, phi=1.5, eta=256, alpha=0.1,
                   beta=0.2, cache=None, batch_size=256, normalize=True,
                   implementation_version=2):
-        """Reference ChebyCF, with sparse batched filtering and CPU scores.
-
-        ``normalize=False`` returns the reference's raw, unmasked scores.
-        By default, apply the row normalization used by the ensemble adapters.
-        Only the current user batch and active sparse/spectral factors live
-        on the calculation device. Cached factors always reside on CPU.
-        """
         if implementation_version != 2:
             raise ValueError("ChebyCF parameters must be revalidated for implementation 2.")
         K, eta, batch_size = int(K), int(eta), int(batch_size)
@@ -250,9 +226,6 @@ class TFmodel:
         ideal_enabled = eta > 0 and alpha > 0
         if ideal_enabled and eta >= min(self.R.shape):
             raise ValueError("eta must be smaller than min(num_users, num_items).")
-
-        # One dataset's normalization, one exact-rank SVD, and at most six
-        # small coefficient vectors. No full score matrices are cached here.
         state = None if cache is None else cache.get("chebycf")
         if state is None or state["owner"] is not self:
             interactions = self.R.astype(np.float32)
@@ -274,7 +247,6 @@ class TFmodel:
 
         coeff_key = (K, float(phi))
         if coeff_key not in state["coefficients"]:
-            # Match ChebyFilter.plateau()/fit(), including its rounding.
             x = torch.cos((K - torch.arange(K + 1)) / K * math.pi).round(decimals=3)
             target = torch.zeros_like(x)
             target[x < 0] = (-x[x < 0]).pow(float(phi)) * 0.5 + 0.5
@@ -292,7 +264,7 @@ class TFmodel:
         coeff = state["coefficients"][coeff_key].to(self.device)
 
         if ideal_enabled and state["eta"] != eta:
-            state["ideal"] = None  # Release the previous rank before fitting.
+            state["ideal"] = None
             _, _, vt = svds(state["normalized"], which="LM", k=eta)
             state["ideal"] = torch.from_numpy(vt.T.copy())
             state["eta"] = eta
@@ -338,7 +310,6 @@ class TFmodel:
         return scores
 
     def S_PGSP(self, k=256, phi=0.7, cache=None):
-        """PGSP scoring adapter using its P0/P1 propagation components."""
         user_degree = np.asarray(self.R.sum(axis=1)).ravel()
         item_degree = np.asarray(self.R.sum(axis=0)).ravel()
         du = np.power(np.maximum(user_degree, 1.0), -0.5)
@@ -348,9 +319,6 @@ class TFmodel:
         normalized = sp.diags(du).dot(self.R).dot(sp.diags(di)).tocsr()
         rank = min(int(k), min(normalized.shape) - 1)
         _, vectors = eigsh(normalized.T.dot(normalized), k=max(1, rank), which="LA")
-        # ``normalized.dot(vectors)`` is dense because ``vectors`` is a
-        # NumPy array; calling ``toarray`` on the result therefore fails.
-        # Convert either sparse or dense results through ``np.asarray``.
         scores = torch.empty(self.R.shape, dtype=torch.float32, device="cpu")
         batch_size = self._score_batch_size()
         for start in range(0, self.n_users, batch_size):
@@ -365,7 +333,6 @@ class TFmodel:
 
     def S_BSPM(self, k=None, alpha=0.5, beta=0.5, gamma=1.0,
                cache=None, **kwargs):
-        """BSPM-compatible propagation adapter returning user-item scores."""
         user_degree = np.asarray(self.R.sum(axis=1)).ravel()
         item_degree = np.asarray(self.R.sum(axis=0)).ravel()
         du = np.power(np.maximum(user_degree, 1.0), -float(alpha))
@@ -385,7 +352,6 @@ class TFmodel:
         return scores
 
     def S_TurboCF(self, alpha=0.5, power=1.0, filter=1, cache=None):
-        """TurboCF sparse polynomial item-graph filtering adapter."""
         rows = np.asarray(self.R.sum(axis=1)).ravel()
         cols = np.asarray(self.R.sum(axis=0)).ravel()
         row_scale = np.power(rows + 1e-12, -float(alpha))
@@ -442,7 +408,6 @@ class TFmodel:
         return count, stamp
 
     def compute_homophily(self):
-        """Compute SGFCF user/item homophily ratios."""
         cached = getattr(self, "_homophily_cache", None)
         if cached is not None:
             return cached
@@ -466,8 +431,6 @@ class TFmodel:
             edges, stamp = self._induced_edges(user_graph, nodes, marker, stamp)
             if len(nodes) > 1:
                 item_ratio[item] = edges / (len(nodes) * (len(nodes) - 1))
-        # Homophily is reused across many filter candidates, so retain it on
-        # the CPU and transfer only the current copy used by SGFCF.
         self._homophily_cache = (
             torch.as_tensor(user_ratio, dtype=torch.float32),
             torch.as_tensor(item_ratio, dtype=torch.float32),
@@ -475,7 +438,6 @@ class TFmodel:
         return self._homophily_cache
 
     def individual_weight(self, value, homophily, beta_1=1.0, beta_2=1.0):
-        """Compute the SGFCF adaptive eigenvalue response."""
         value = value if torch.is_tensor(value) else torch.as_tensor(value, dtype=torch.float32, device=self.device)
         homophily = homophily if torch.is_tensor(homophily) else torch.as_tensor(homophily, dtype=torch.float32, device=self.device)
         minimum, maximum = homophily.min(), homophily.max()
@@ -491,14 +453,6 @@ class TFmodel:
                 alpha=0.0, beta=0.0, drop_p=0.6, xi=0.1,
                 alpha_i=None, lambda_i=None,
                 alpha_u=None, lambda_u=None):
-        """Fit DAN using the SGFCF-style user/item normalization.
-
-        When all four normalization arguments are supplied, the input is
-        transformed as ``D_U @ R @ D_I`` where
-        ``D_U=(d_U+lambda_u)^(-alpha_u)`` and
-        ``D_I=(d_I+lambda_i)^(-alpha_i)``.  Leaving them unset preserves the
-        previous behavior and fits DAN on the supplied interaction matrix.
-        """
         if model not in {"LAE_DAN", "EASE_DAN", "RLAE_DAN"}:
             raise ValueError(f"Unknown DAN model: {model}")
         X = (self.R if interactions is None else interactions).astype(np.float64).tocsr()
@@ -549,15 +503,6 @@ class TFmodel:
                          alpha_i=0.2, lambda_i=1.0,
                          alpha_u=0.2, lambda_u=1.0, cache=None,
                          return_components=False):
-        """Build a dense user-item score matrix for SGFCF+DAN testing.
-
-        The SGFCF graph-filter scores and DAN autoencoder scores are computed
-        with this class's component methods, normalized row-wise, combined,
-        and passed through a sigmoid.  The returned ``X`` has shape
-        ``(n_users, m_items)`` and can be used directly with
-        :meth:`Test_RatingMatrix`.
-        """
-        # SGFCF graph filtering on the normalized bipartite adjacency.
         user_degree = np.asarray(self.R.sum(axis=1)).ravel()
         item_degree = np.asarray(self.R.sum(axis=0)).ravel()
         with np.errstate(divide="ignore", invalid="ignore"):
@@ -582,9 +527,6 @@ class TFmodel:
                 while len(norm_cache) >= int(max_entries):
                     norm_cache.pop(next(iter(norm_cache)))
                 norm_cache[norm_key] = (normalized_interaction, normalized_adj)
-        # Eigenspaces depend only on normalization parameters and k, not on
-        # beta, gamma, DAN parameters, or the mixing coefficient.  Reuse them
-        # across candidates when a cache is supplied by the caller.
         eig_cache = None if cache is None else cache.setdefault("eigen", {})
         eig_key = (int(self.k), float(alpha_i), float(lambda_i),
                    float(alpha_u), float(lambda_u))
@@ -612,8 +554,6 @@ class TFmodel:
         graph_sum = graph_scores.sum(dim=1, keepdim=True)
         graph_sum[graph_sum == 0] = 1.0
         graph_scores = graph_scores / graph_sum
-        # The convolution term is controlled by ``gamma``.  Avoid building
-        # the large dense user-item convolution when its coefficient is zero.
         gamma_value = float(gamma)
         convolution = None
         if gamma_value != 0.0:
@@ -626,8 +566,6 @@ class TFmodel:
             convolution_sum = convolution.sum(dim=1, keepdim=True)
             convolution_sum[convolution_sum == 0] = 1.0
             convolution = convolution / convolution_sum
-
-        # DAN autoencoder scores from the same training interaction matrix.
         dan_options = dict(dan_params or {})
         dan_alpha = float(dan_options.pop("alpha", 0.0))
         dan_beta = float(dan_options.pop("beta", 0.0))
@@ -652,8 +590,6 @@ class TFmodel:
                 while len(dan_cache) >= int(max_entries):
                     dan_cache.pop(next(iter(dan_cache)))
                 dan_cache[dan_key] = dan_state
-        # Score DAN with the same normalized interaction matrix used to fit
-        # the model, rather than reverting to the raw interaction matrix.
         dan_scores = np.asarray(
             normalized_interaction.dot(dan_state["weights"]), dtype=np.float32
         )
@@ -676,15 +612,11 @@ class TFmodel:
         X[:, torch.as_tensor(cold_items, device=self.device)] = -(1 << 10)
         return X
 
-
-
     # Dataset Operation Functions
 
     def getNormAdj(self,A,D_inv,alpha1=0.2,alpha2=0.4):
         adj_norm = D_inv.power(alpha1) @ A @ D_inv.power(alpha2)
         return adj_norm
-
-
 
     # Embedding Functions
 
@@ -719,8 +651,6 @@ class TFmodel:
         
         return U_L,U_R,Eigs
     
-
-
     # Evaluation Functions
 
     def getUsersRating(self,X,users,apply_sigmoid=True):
@@ -828,8 +758,6 @@ class TFmodel:
             if multicore == 1:
                 pool.close()
             return results
-
-
 
     def Test_RatingMatrix(self, X, dataset, users=None, items=None, multicore=0):
         u_batch_size = world.config['test_u_batch_size']

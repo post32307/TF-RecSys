@@ -644,12 +644,12 @@ def test_env(seed):
     }
 
 def format_duration(seconds):
-    seconds = max(0, int(seconds))
+    seconds = max(0.0, float(seconds))
     hours, rem = divmod(seconds, 3600)
     minutes, seconds = divmod(rem, 60)
     if hours:
-        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
-    return f"{minutes:02d}:{seconds:02d}"
+        return f"{int(hours):d}:{int(minutes):02d}:{seconds:06.3f}"
+    return f"{int(minutes):02d}:{seconds:06.3f}"
 
 def format_bytes(num_bytes):
     value = float(num_bytes)
@@ -841,7 +841,7 @@ def run_experiment(model_name, dataset, log_dir, gpu=None, params=None, seed=Non
     print(f"  -> Running {model_name} on {dataset} on GPU {gpu} with {params if params else 'defaults'}... (Logging to {log_file})")
     
     with open(log_file, 'a') as f:
-        start_time = time.time()
+        start_time = time.perf_counter()
         try:
             f.write(f"\n=== {time.ctime()} ===\n")
             f.write(f"Command: {' '.join(cmd)}\n")
@@ -868,7 +868,7 @@ def run_experiment(model_name, dataset, log_dir, gpu=None, params=None, seed=Non
                         os.killpg(proc.pid, signal.SIGKILL)
                     except Exception:
                         pass
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 print(f"  !! Timeout running {model_name} on {dataset} after {duration:.2f}s. Check {log_file}")
                 metrics = "TIMEOUT"
                 if return_details:
@@ -876,20 +876,20 @@ def run_experiment(model_name, dataset, log_dir, gpu=None, params=None, seed=Non
                 return metrics
 
             if returncode != 0:
-                duration = time.time() - start_time
+                duration = time.perf_counter() - start_time
                 print(f"  !! Error running {model_name} on GPU {gpu}. Check {log_file}")
                 if return_details:
                     return {"metrics": "ERROR", "status": "ERROR", "duration": duration, "log_file": log_file}
                 return "ERROR"
 
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
             print(f"  -> Finished {model_name} on GPU {gpu} in {duration:.2f}s")
             metrics = parse_metrics(log_file, model_name)
             if return_details:
                 return {"metrics": metrics, "status": "OK", "duration": duration, "log_file": log_file}
             return metrics
         except Exception as e:
-            duration = time.time() - start_time
+            duration = time.perf_counter() - start_time
             print(f"  !! Error running {model_name} on GPU {gpu}. Check {log_file}")
             f.write(f"\nException: {e}\n")
             if return_details:
@@ -897,7 +897,7 @@ def run_experiment(model_name, dataset, log_dir, gpu=None, params=None, seed=Non
             return "ERROR"
 
 def verify_model_dataset(model_name, dataset, log_dir, gpu, seed, timeout, threads_per_task, combination_limit):
-    started_at = time.time()
+    started_at = time.perf_counter()
     attempts = []
     last_detail = None
     split_env = test_env(seed)
@@ -944,7 +944,7 @@ def verify_model_dataset(model_name, dataset, log_dir, gpu, seed, timeout, threa
         "status": status,
         "metrics": last_detail["metrics"],
         "params": last_detail.get("params"),
-        "duration": time.time() - started_at,
+        "duration": time.perf_counter() - started_at,
         "attempts": len(attempts),
         "log_file": last_detail.get("log_file"),
         "gpu": gpu,
@@ -953,7 +953,7 @@ def verify_model_dataset(model_name, dataset, log_dir, gpu, seed, timeout, threa
 def print_progress(done_count, total_count, started_at, active, last_result=None):
     pct = (done_count / total_count * 100.0) if total_count else 100.0
     active_bits = []
-    now = time.time()
+    now = time.perf_counter()
     for meta in list(active.values())[:4]:
         active_bits.append(f"{meta['model']}/{meta['dataset']} {format_duration(now - meta['start_time'])}")
     active_str = ", ".join(active_bits) if active_bits else "none"
@@ -966,7 +966,7 @@ def print_progress(done_count, total_count, started_at, active, last_result=None
     print(
         f"{progress_bar(done_count, total_count)} "
         f"{done_count}/{total_count} {pct:5.1f}% "
-        f"elapsed {format_duration(time.time() - started_at)}"
+        f"elapsed {format_duration(time.perf_counter() - started_at)}"
         f"{last_str} | running: {active_str}",
         flush=True,
     )
@@ -974,7 +974,7 @@ def print_progress(done_count, total_count, started_at, active, last_result=None
 def report_dataset_complete(dataset, dataset_results, dataset_started_at, dataset_size):
     print(
         f"\n=== Dataset complete: {dataset} ({format_bytes(dataset_size)}) "
-        f"in {format_duration(time.time() - dataset_started_at)} ==="
+        f"in {format_duration(time.perf_counter() - dataset_started_at)} ==="
     )
     for result in sorted(dataset_results, key=lambda item: item["model"]):
         print(
@@ -999,7 +999,7 @@ def write_dataset_chunk(test_results_file, seed, dataset, dataset_results, datas
         f.write("=" * 120 + "\n")
         f.write(
             f"Dataset: {dataset} | Size: {format_bytes(dataset_size)} | "
-            f"Elapsed: {format_duration(time.time() - dataset_started_at)}\n"
+            f"Elapsed: {format_duration(time.perf_counter() - dataset_started_at)}\n"
         )
         f.write("-" * 120 + "\n")
         f.write(f"{'Model':<10} | {'Dataset':<20} | {'Metrics':<60} | {'Time':<8} | Parameters\n")
@@ -1138,17 +1138,17 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
         gpu_index = 0
         total_count = len(tasks)
         done_count = 0
-        started_at = time.time()
-        dataset_started_at = {dataset: time.time() for dataset in remaining_datasets}
+        started_at = time.perf_counter()
+        dataset_started_at = {dataset: time.perf_counter() for dataset in remaining_datasets}
         dataset_remaining = {dataset: len(models_to_run) for dataset in remaining_datasets}
         dataset_results = {dataset: [] for dataset in remaining_datasets}
         last_progress_at = 0.0
         active_slot_seconds = 0.0
-        last_active_sample_at = time.time()
+        last_active_sample_at = time.perf_counter()
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             while pending or active:
-                now = time.time()
+                now = time.perf_counter()
                 active_slot_seconds += len(active) * (now - last_active_sample_at)
                 last_active_sample_at = now
 
@@ -1181,13 +1181,13 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
                     active[future] = {
                         "model": task["model"],
                         "dataset": task["dataset"],
-                        "start_time": time.time(),
+                        "start_time": time.perf_counter(),
                         "memory_mb": task["memory_mb"],
                     }
                     active_memory_mb += task["memory_mb"]
                     launched_any = True
 
-                now = time.time()
+                now = time.perf_counter()
                 if launched_any and now - last_progress_at > 5:
                     print_progress(done_count, total_count, started_at, active)
                     last_progress_at = now
@@ -1198,9 +1198,9 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
 
                 done_futures, _ = wait(active.keys(), timeout=1, return_when=FIRST_COMPLETED)
                 if not done_futures:
-                    if time.time() - last_progress_at >= 30:
+                    if time.perf_counter() - last_progress_at >= 30:
                         print_progress(done_count, total_count, started_at, active)
-                        last_progress_at = time.time()
+                        last_progress_at = time.perf_counter()
                     continue
 
                 for future in done_futures:
@@ -1215,7 +1215,7 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
                             "status": "ERROR",
                             "metrics": f"ERROR: {e}",
                             "params": None,
-                            "duration": time.time() - meta["start_time"],
+                            "duration": time.perf_counter() - meta["start_time"],
                             "attempts": 0,
                             "log_file": None,
                             "gpu": None,
@@ -1230,7 +1230,7 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
                     print(result_line)
 
                     print_progress(done_count, total_count, started_at, active, result)
-                    last_progress_at = time.time()
+                    last_progress_at = time.perf_counter()
 
                     if dataset_remaining[dataset] == 0:
                         report_dataset_complete(
@@ -1248,7 +1248,7 @@ def run_verification_sweep(args, models_to_run, datasets_to_run):
                             dataset_sizes[dataset],
                         )
 
-        now = time.time()
+        now = time.perf_counter()
         active_slot_seconds += len(active) * (now - last_active_sample_at)
         elapsed = max(1e-9, now - started_at)
         avg_active = active_slot_seconds / elapsed
@@ -1631,7 +1631,7 @@ def main():
                                         active[future] = {
                                             "order": next_submit,
                                             "params": params,
-                                            "start_time": time.time(),
+                                            "start_time": time.perf_counter(),
                                         }
                                         next_submit += 1
 
@@ -1674,7 +1674,7 @@ def main():
                                                 detail = {
                                                     "metrics": "ERROR",
                                                     "status": "ERROR",
-                                                    "duration": time.time() - meta["start_time"],
+                                                    "duration": time.perf_counter() - meta["start_time"],
                                                     "log_file": None,
                                                 }
                                             completed[meta["order"]] = (params, detail)

@@ -19,6 +19,8 @@ recbole.trainer.trainer
 
 from modulefinder import Module
 import os
+from pathlib import Path
+from time import perf_counter
 
 from logging import getLogger
 from pickletools import optimize
@@ -49,6 +51,17 @@ from recbole.utils import (
     WandbLogger,
 )
 from torch.nn.parallel import DistributedDataParallel
+
+
+def _sync_cuda(device):
+    if torch.device(device).type == "cuda":
+        torch.cuda.synchronize(device)
+
+
+def _append_runtime_record(record):
+    runtime_file = Path(__file__).resolve().parents[2] / "runtime.txt"
+    with runtime_file.open("a", encoding="utf-8") as output:
+        output.write(record + "\n")
 
 
 class AbstractTrainer(object):
@@ -431,6 +444,7 @@ class Trainer(AbstractTrainer):
         Returns:
              (float, dict): best valid score and best valid result. If valid_data is None, it returns (-1, None)
         """
+        full_training_started_at = perf_counter()
         if saved and self.start_epoch >= self.epochs:
             self._save_checkpoint(-1, verbose=verbose)
 
@@ -442,8 +456,20 @@ class Trainer(AbstractTrainer):
         for epoch_idx in range(self.start_epoch, self.epochs):
             # train
             training_start_time = time()
+            _sync_cuda(self.device)
+            epoch_started_at = perf_counter()
             train_loss = self._train_epoch(
                 train_data, epoch_idx, show_progress=show_progress
+            )
+            _sync_cuda(self.device)
+            epoch_seconds = perf_counter() - epoch_started_at
+            _append_runtime_record(
+                f"stage=epoch_training model={self.config['model']} "
+                f"dataset={self.config['dataset']} seed={self.config['seed']} "
+                f"epoch={epoch_idx + 1} embedding_size={self.config['embedding_size']} "
+                f"n_layers={self.config['n_layers']} "
+                f"learning_rate={self.config['learning_rate']} "
+                f"reg_weight={self.config['reg_weight']} seconds={epoch_seconds:.6f}"
             )
             self.train_loss_dict[epoch_idx] = (
                 sum(train_loss) if isinstance(train_loss, tuple) else train_loss
@@ -521,6 +547,17 @@ class Trainer(AbstractTrainer):
                 valid_step += 1
 
         self._add_hparam_to_tensorboard(self.best_valid_score)
+        _sync_cuda(self.device)
+        full_training_seconds = perf_counter() - full_training_started_at
+        _append_runtime_record(
+            f"stage=full_training model={self.config['model']} "
+            f"dataset={self.config['dataset']} seed={self.config['seed']} "
+            f"epochs_completed={epoch_idx + 1 if self.start_epoch < self.epochs else 0} "
+            f"embedding_size={self.config['embedding_size']} "
+            f"n_layers={self.config['n_layers']} "
+            f"learning_rate={self.config['learning_rate']} "
+            f"reg_weight={self.config['reg_weight']} seconds={full_training_seconds:.6f}"
+        )
         return self.best_valid_score, self.best_valid_result
 
     def _full_sort_batch_eval(self, batched_data):
