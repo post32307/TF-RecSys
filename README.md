@@ -1,2 +1,2 @@
 # TF-RecSys
-Training-Free Recommendations + Eigendecomposition Methods
+Training-Free Recommendations
