@@ -59,16 +59,17 @@ def load_dataset_split(loader_class, dataset_path, eval_file):
 
 # init tensorboard
 if world.tensorboard:
-    w: SummaryWriter = SummaryWriter(
+    tensorWrite: SummaryWriter = SummaryWriter(
         join(world.BOARD_PATH, time.strftime("%m-%d-%Hh%Mm%Ss-") + "-" + world.comment)
     )
 else:
-    w = None
+    tensorWrite = None
     world.cprint("not enable tensorflowboard")
 
 try:
 
-    # # # Important : The model now performs averaging on the stage1 ensemble models. It then looks for the best a_sum only in the second stage.
+    # Average the selected configurations for each model, then search the
+    # weight applied to the first model in the sorted ensemble pair.
     
     val_true = 1
     #   0: no hyperparameter search; test default params on test.txt
@@ -82,14 +83,11 @@ try:
     if fixed_k not in (0, 1):
         raise ValueError("fixed_k must be 0 or 1.")
     
-    TOP_CANDIDATES = world.ensemble_k
+    TOP_CANDIDATES = world.M
     # Number of per-model candidates retained from the individual validation searches before the ensemble search.
 
-    a_sum_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
-    # a_sum_space = (0.0,) # Removing secondary model
-    # a_sum_space = (1.0,) # Removing primary model
-    # a_sum_space = (0.5,) # Simple Average
-    # Ensemble scores are (1-a_sum) * Model_1 + a_sum * Model_2
+    w_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
+    # Ensemble scores are w * Model_1 + (1-w) * Model_2.
 
 
     # ---------------------------------------------------------
@@ -334,9 +332,9 @@ try:
         "dan": {}, "max_dan_entries": 1,
     }
     saved_parameters = load_saved_parameters()
-    saved_sg = saved_parameters.get("SGFCF")
-    saved_dan = saved_parameters.get("DAN")
     ensemble_models = sorted(set(world.ensemble_models))
+    if len(ensemble_models) != 2:
+        raise ValueError("Select exactly two distinct ensemble models.")
     # Ensemble results are keyed by the participating model pair so multiple
     # ensembles for the same dataset/seed do not overwrite one another.
     ensemble_key = "ensemble:" + "+".join(ensemble_models)
@@ -349,37 +347,15 @@ try:
                 set(ensemble_models).issubset(legacy_ensemble)):
             saved_ensemble = legacy_ensemble
     world.cprint(f"Ensemble models: {', '.join(ensemble_models)}")
-    # Only parameters for models requested in this run are eligible for
-    # skipping.  A saved DAN entry must not affect an SGFCF+TurboCF run.
-    if "SGFCF" not in ensemble_models:
-        saved_sg = None
-    if "DAN" not in ensemble_models:
-        saved_dan = None
     # Ensemble parameters are logged only on the pair-specific parameter
     # line below; no separate ``Ensembling ...`` marker is emitted.
     if saved_ensemble is not None:
-        if not set(ensemble_models).issubset(set(saved_ensemble)):
+        if (not isinstance(saved_ensemble, dict) or
+                not set(ensemble_models).issubset(saved_ensemble) or
+                saved_ensemble.get("weight_model") != ensemble_models[0]):
+            # Older entries do not specify which model receives w.
+            # Recompute their weight with the shared scoring convention.
             saved_ensemble = None
-        elif ensemble_models == ["DAN", "SGFCF"] and not all(
-                isinstance(saved_ensemble.get(name), list) and
-                len(saved_ensemble[name]) >= TOP_CANDIDATES
-                for name in ("SGFCF", "DAN")):
-            # Older SGFCF+DAN entries stored only one parameter set per model.
-            # They cannot represent the requested top-K ensemble.
-            saved_ensemble = None
-    if isinstance(saved_sg, list) and len(saved_sg) >= TOP_CANDIDATES:
-        world.cprint(f"Found saved SGFCF top-{TOP_CANDIDATES} parameters; skipping SGFCF search.")
-    if isinstance(saved_dan, list) and len(saved_dan) >= TOP_CANDIDATES:
-        world.cprint(f"Found saved DAN top-{TOP_CANDIDATES} parameters; skipping DAN search.")
-    if saved_ensemble is not None:
-        world.cprint("Found saved ensemble parameters; skipping ensemble search.")
-
-    sg_space = product((0.8, 1.0), (1.1, 1.3),
-                       (0.0, 1.0, 20.0), (0.1, 0.3, 0.5),
-                       (0.1, 0.5, 1.0))
-    dan_space = product((20.0, 50.0), (0.1, 0.3, 0.5),
-                        (0.1, 0.3, 0.5), (0.2, 0.6),
-                        (0.1, 0.3, 0.5))
 
     def metric(scores, evaluator, target):
         return evaluator.Test_RatingMatrix(scores, target)
@@ -494,232 +470,84 @@ try:
         entries.sort(key=lambda value: value[0], reverse=True)
         del entries[limit:]
 
-    top_sg = []
-    top_dan = []
-    generic_best = None
     if val_true:
-        # Keep normalization and k outermost.  This makes the cached
-        # normalized adjacency/eigenspace reusable for every filter setting.
-        sg_saved_top10 = isinstance(saved_sg, list) and len(saved_sg) >= TOP_CANDIDATES
-        dan_saved_top10 = isinstance(saved_dan, list) and len(saved_dan) >= TOP_CANDIDATES
-        if "SGFCF" in ensemble_models and not sg_saved_top10:
-            sg_candidates = list(sg_space)
-            sg_index = 0
-            for alpha in (0.0, 1.0, 20.0):
-                for eps in (0.1, 0.3, 0.5):
-                    for k in search_k_values:
-                        for b1, b2, gamma in product((0.8, 1.0), (1.1, 1.3),
-                                                       (0.1, 0.5, 1.0)):
-                            sg_index += 1
-                            scores = search_model.S_SGFCF(b1, b2, alpha, eps, gamma, k, cache)
-                            result = metric(scores, search_model, search_dataset)
-                            score = float(result["recall"][0])
-                            sg_params = {
-                                "beta_1": b1, "beta_2": b2, "alpha": alpha,
-                                "eps": eps, "gamma": gamma, "k": k}
-                            keep_top(top_sg, (score, sg_params, result))
-                            del scores
-                        if sg_index % 25 == 0 or sg_index == len(sg_candidates) * len(search_k_values):
-                            world.cprint(f"SGFCF search {sg_index}/{len(sg_candidates) * len(search_k_values)}: best Recall@20={top_sg[0][0]:.6f}")
-            save_best_parameters("SGFCF", [entry[1] for entry in top_sg])
-        elif "SGFCF" in ensemble_models:
-            saved_sg_candidates = (saved_sg[:TOP_CANDIDATES]
-                                   if isinstance(saved_sg, list) else [saved_sg])
-            top_sg = [(0.0, dict(params), None) for params in saved_sg_candidates]
-        else:
-            top_sg = []
-        if "DAN" in ensemble_models and not dan_saved_top10:
-            dan_candidates = list(dan_space)
-            for index, (reg_p, alpha, beta, drop_p, xi) in enumerate(dan_candidates, 1):
-                scores = search_model.S_DAN("RLAE_DAN", reg_p, alpha, beta, drop_p, xi, cache)
+        model_candidates = {}
+        for model_name in ensemble_models:
+            saved = saved_parameters.get(model_name)
+            saved_candidates = (saved if isinstance(saved, list) else
+                                ([saved] if saved is not None else []))
+            if len(saved_candidates) >= TOP_CANDIDATES:
+                model_candidates[model_name] = [
+                    dict(params) for params in saved_candidates[:TOP_CANDIDATES]
+                ]
+                world.cprint(
+                    f"Found saved {model_name} top-{len(model_candidates[model_name])} "
+                    f"parameters; skipping {model_name} search."
+                )
+                continue
+
+            candidates = model_parameter_space(model_name)
+            entries = []
+            for index, params in enumerate(candidates, 1):
+                scores = score_model(search_model, model_name, params, cache)
                 result = metric(scores, search_model, search_dataset)
                 score = float(result["recall"][0])
-                dan_params = {
-                        "model": "RLAE_DAN", "reg_p": reg_p, "alpha": alpha,
-                        "beta": beta, "drop_p": drop_p, "xi": xi}
-                keep_top(top_dan, (score, dan_params, result))
+                keep_top(entries, (score, dict(params), result))
                 del scores
-                if index % 10 == 0 or index == len(dan_candidates):
-                    world.cprint(f"DAN search {index}/{len(dan_candidates)}: best Recall@20={top_dan[0][0]:.6f}")
-            save_best_parameters("DAN", [entry[1] for entry in top_dan])
-        elif "DAN" in ensemble_models:
-            saved_dan_candidates = (saved_dan[:TOP_CANDIDATES]
-                                    if isinstance(saved_dan, list) else [saved_dan])
-            top_dan = [(0.0, dict(params), None) for params in saved_dan_candidates]
-        else:
-            top_dan = []
-        if ensemble_models != ["DAN", "SGFCF"]:
-            # The generic branch below handles other pairs.  Keep any
-            # SGFCF/DAN top-10 results already computed above, and only seed
-            # placeholders for models that are not part of this run.
-            if "SGFCF" not in ensemble_models:
-                top_sg = [(0.0, default_model_parameters("SGFCF"), None)]
-            if "DAN" not in ensemble_models:
-                top_dan = [(0.0, default_model_parameters("DAN"), None)]
-        # Search the legacy SGFCF+DAN second stage only for the default pair.
-        # Other pairs are handled exclusively by the generic top-10 branch
-        # below; running this block for them would evaluate irrelevant
-        # placeholder SGFCF/DAN scores and overwrite their ensemble log.
-        best_a_sum, best_result, best_score = None, None, -np.inf
-        best_sg, best_dan = None, None
-        best_sg_result, best_dan_result = None, None
-        if ensemble_models == ["DAN", "SGFCF"]:
-            best_sg_result, best_dan_result = top_sg[0][2], top_dan[0][2]
-            if saved_ensemble is not None:
-                best_a_sum = float(saved_ensemble["a_sum"])
-                best_sg = [dict(params) for params in saved_ensemble["SGFCF"][:TOP_CANDIDATES]]
-                best_dan = [dict(params) for params in saved_ensemble["DAN"][:TOP_CANDIDATES]]
-                best_result = None
-            else:
-                sg_candidates = [dict(params) for _, params, _ in top_sg]
-                dan_candidates = [dict(params) for _, params, _ in top_dan]
-                mean_sg = None
-                for params in sg_candidates:
-                    scores = search_model.S_SGFCF(**params, cache=cache)
-                    mean_sg = scores if mean_sg is None else mean_sg + scores
-                    del scores
-                mean_sg /= len(sg_candidates)
-                mean_dan = None
-                for params in dan_candidates:
-                    scores = search_model.S_DAN(**params, cache=cache)
-                    mean_dan = scores if mean_dan is None else mean_dan + scores
-                    del scores
-                mean_dan /= len(dan_candidates)
-                for a_sum in a_sum_space:
-                    ensemble = (float(a_sum) * mean_sg +
-                                (1.0 - float(a_sum)) * mean_dan)
-                    result = metric(ensemble, search_model, search_dataset)
-                    score = float(result["recall"][0])
-                    if score > best_score:
-                        best_score = score
-                        best_a_sum = a_sum
-                        best_result = result
-                    del ensemble
-                best_sg, best_dan = sg_candidates, dan_candidates
-                del mean_sg, mean_dan
-                save_best_parameters(
-                    ensemble_key,
-                    {"a_sum": best_a_sum, "SGFCF": best_sg, "DAN": best_dan},
-                )
-        if ensemble_models != ["DAN", "SGFCF"]:
-            # For the additional baselines, run the same validation/resume
-            # protocol through their scoring adapters.  Their default grids
-            # can be expanded without changing the ensemble machinery.
-            model_candidates = {}
-            model_results = {}
-            # Every model participates in the same top-10 validation protocol.
-            # Previously only SGFCF and DAN were searched; the other adapters
-            # silently fell back to one default configuration.  A saved list
-            # with ten entries can be reused, while an old single-entry log is
-            # deliberately refreshed so it is upgraded to top-10 format.
-            for model_name in ensemble_models:
-                # SGFCF/DAN may have just been searched by the dedicated
-                # blocks above.  Reuse those in-memory results instead of
-                # repeating the full grid because the on-disk log was loaded
-                # before the current search started.
-                if model_name == "SGFCF" and top_sg and top_sg[0][2] is not None:
-                    model_candidates[model_name] = [entry[1] for entry in top_sg]
-                    continue
-                if model_name == "DAN" and top_dan and top_dan[0][2] is not None:
-                    model_candidates[model_name] = [entry[1] for entry in top_dan]
-                    continue
-                saved = saved_parameters.get(model_name)
-                saved_candidates = (saved if isinstance(saved, list) else
-                                    ([saved] if saved is not None else []))
-                if len(saved_candidates) >= TOP_CANDIDATES:
-                    model_candidates[model_name] = [dict(p) for p in saved_candidates[:TOP_CANDIDATES]]
+                if index % 25 == 0 or index == len(candidates):
                     world.cprint(
-                        f"Found saved {model_name} top-{len(model_candidates[model_name])} parameters; skipping {model_name} search."
+                        f"{model_name} search {index}/{len(candidates)}: "
+                        f"best Recall@20={entries[0][0]:.6f}"
                     )
-                    continue
+            if not entries:
+                params = default_model_parameters(model_name)
+                scores = score_model(search_model, model_name, params, cache)
+                result = metric(scores, search_model, search_dataset)
+                entries = [(float(result["recall"][0]), params, result)]
+                del scores
+            model_candidates[model_name] = [entry[1] for entry in entries]
+            save_best_parameters(model_name, model_candidates[model_name])
 
-                candidates = model_parameter_space(model_name)
-                entries = []
-                for index, params in enumerate(candidates, 1):
-                    scores = score_model(search_model, model_name, params, cache)
-                    result = metric(scores, search_model, search_dataset)
-                    score = float(result["recall"][0])
-                    keep_top(entries, (score, dict(params), result))
-                    del scores
-                    if index % 25 == 0 or index == len(candidates):
-                        world.cprint(
-                            f"{model_name} search {index}/{len(candidates)}: "
-                            f"best Recall@20={entries[0][0]:.6f}"
-                        )
-                # A non-empty grid is guaranteed by model_parameter_space; the
-                # fallback keeps the code robust if a future grid is empty.
-                if not entries:
-                    params = default_model_parameters(model_name)
-                    scores = score_model(search_model, model_name, params, cache)
-                    result = metric(scores, search_model, search_dataset)
-                    entries = [(float(result["recall"][0]), params, result)]
-                    del scores
-                model_candidates[model_name] = [entry[1] for entry in entries]
-                model_results[model_name] = entries[0][2]
-                save_best_parameters(model_name, model_candidates[model_name])
-            first_model, second_model = ensemble_models
-            saved_generic = saved_ensemble
-            saved_first = (saved_generic.get(first_model)
-                           if saved_generic is not None else None)
-            saved_second = (saved_generic.get(second_model)
-                            if saved_generic is not None else None)
-            if (isinstance(saved_first, list) and len(saved_first) >= TOP_CANDIDATES
-                    and isinstance(saved_second, list)
-                    and len(saved_second) >= TOP_CANDIDATES):
-                generic_best = saved_generic
-            else:
-                best_score_generic = -np.inf
-                mean_scores = {}
-                for model_name in (first_model, second_model):
-                    candidate_scores = [
-                        score_model(search_model, model_name, params, cache)
-                        for params in model_candidates[model_name]
-                    ]
-                    mean_scores[model_name] = sum(candidate_scores) / len(candidate_scores)
-                    del candidate_scores
-                for a_sum in a_sum_space:
-                    combined = model.LinearScoreMatrix(
-                        mean_scores[first_model], mean_scores[second_model], a_sum
-                    )
-                    result = metric(combined, search_model, search_dataset)
-                    score = float(result["recall"][0])
-                    if score > best_score_generic:
-                        best_score_generic = score
-                        generic_best = {
-                            "a_sum": a_sum,
-                            first_model: [dict(p) for p in model_candidates[first_model]],
-                            second_model: [dict(p) for p in model_candidates[second_model]],
-                        }
-                    del combined
-                del mean_scores
-                save_best_parameters(ensemble_key, generic_best)
-    else:
-        saved_sg_default = (saved_sg[:TOP_CANDIDATES] if isinstance(saved_sg, list)
-                            else ([saved_sg] if saved_sg else []))
-        saved_dan_default = (saved_dan[:TOP_CANDIDATES] if isinstance(saved_dan, list)
-                             else ([saved_dan] if saved_dan else []))
-        best_sg = saved_sg_default or {
-            "beta_1": 1.0, "beta_2": 1.0, "alpha": 0.0,
-            "eps": 0.5, "gamma": 1.0,
-            "k": int(input_k) if fixed_k else int(search_k_values[0])}
-        best_dan = saved_dan_default or {
-            "model": "RLAE_DAN", "reg_p": 20.0, "alpha": 0.2,
-            "beta": 0.3, "drop_p": 0.6, "xi": 0.1}
-        if ensemble_models != ["DAN", "SGFCF"]:
-            generic_best = saved_ensemble or {
-                "a_sum": 0.5,
-                **{name: default_model_parameters(name) for name in ensemble_models},
-            }
-            best_a_sum = generic_best["a_sum"]
-        elif saved_ensemble is not None:
-            best_a_sum = float(saved_ensemble["a_sum"])
-            best_sg = [dict(params) for params in saved_ensemble["SGFCF"][:TOP_CANDIDATES]]
-            best_dan = [dict(params) for params in saved_ensemble["DAN"][:TOP_CANDIDATES]]
+        first_model, second_model = ensemble_models
+        if (saved_ensemble is not None and
+                all(isinstance(saved_ensemble.get(name), list) and
+                    len(saved_ensemble[name]) >= TOP_CANDIDATES
+                    for name in ensemble_models)):
+            generic_best = saved_ensemble
+            world.cprint("Found saved ensemble parameters; skipping ensemble search.")
         else:
-            best_a_sum = 0.5
-        best_result = None
-
-
+            best_score_generic = -np.inf
+            mean_scores = {}
+            for model_name in ensemble_models:
+                candidate_scores = [
+                    score_model(search_model, model_name, params, cache)
+                    for params in model_candidates[model_name]
+                ]
+                mean_scores[model_name] = sum(candidate_scores) / len(candidate_scores)
+                del candidate_scores
+            for w in w_space:
+                combined = model.LinearScoreMatrix(
+                    mean_scores[first_model], mean_scores[second_model], w
+                )
+                result = metric(combined, search_model, search_dataset)
+                score = float(result["recall"][0])
+                if score > best_score_generic:
+                    best_score_generic = score
+                    generic_best = {
+                        "w": w,
+                        "weight_model": first_model,
+                        first_model: [dict(p) for p in model_candidates[first_model]],
+                        second_model: [dict(p) for p in model_candidates[second_model]],
+                    }
+                del combined
+            del mean_scores
+            save_best_parameters(ensemble_key, generic_best)
+    else:
+        generic_best = saved_ensemble or {
+            "w": 0.5,
+            "weight_model": ensemble_models[0],
+            **{name: default_model_parameters(name) for name in ensemble_models},
+        }
 
 
     # ---------------------------------------------------------
@@ -729,39 +557,22 @@ try:
         torch.cuda.synchronize()
     test_start = time.perf_counter()
 
-    if generic_best is not None:
-        first_model, second_model = ensemble_models
-        first_candidates = generic_best[first_model]
-        second_candidates = generic_best[second_model]
-        if isinstance(first_candidates, dict):
-            first_candidates = [first_candidates]
-        if isinstance(second_candidates, dict):
-            second_candidates = [second_candidates]
-        first_test_scores = [score_model(Recmodel, first_model, params, cache)
-                             for params in first_candidates]
-        second_test_scores = [score_model(Recmodel, second_model, params, cache)
-                              for params in second_candidates]
-        first_test = sum(first_test_scores) / len(first_test_scores)
-        second_test = sum(second_test_scores) / len(second_test_scores)
-        del first_test_scores, second_test_scores
-        test_scores = model.LinearScoreMatrix(first_test, second_test, generic_best["a_sum"])
-        del first_test, second_test
-    else:
-        sg_candidates = best_sg if isinstance(best_sg, list) else [best_sg]
-        dan_candidates = best_dan if isinstance(best_dan, list) else [best_dan]
-        sg_test = None
-        for params in sg_candidates:
-            scores = Recmodel.S_SGFCF(**params, cache=cache)
-            sg_test = scores if sg_test is None else sg_test + scores
-            del scores
-        sg_test /= len(sg_candidates)
-        dan_test = None
-        for params in dan_candidates:
-            scores = Recmodel.S_DAN(**params, cache=cache)
-            dan_test = scores if dan_test is None else dan_test + scores
-            del scores
-        dan_test /= len(dan_candidates)
-        test_scores = float(best_a_sum) * sg_test + (1.0 - float(best_a_sum)) * dan_test
+    first_model, second_model = ensemble_models
+    first_candidates = generic_best[first_model]
+    second_candidates = generic_best[second_model]
+    if isinstance(first_candidates, dict):
+        first_candidates = [first_candidates]
+    if isinstance(second_candidates, dict):
+        second_candidates = [second_candidates]
+    first_test_scores = [score_model(Recmodel, first_model, params, cache)
+                         for params in first_candidates]
+    second_test_scores = [score_model(Recmodel, second_model, params, cache)
+                          for params in second_candidates]
+    first_test = sum(first_test_scores) / len(first_test_scores)
+    second_test = sum(second_test_scores) / len(second_test_scores)
+    del first_test_scores, second_test_scores
+    test_scores = model.LinearScoreMatrix(first_test, second_test, generic_best["w"])
+    del first_test, second_test
     test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
@@ -770,27 +581,11 @@ try:
     # Update both freshly searched and resumed ensembles after testing.
     # Do not mark unvalidated defaults from val_true=0 as a completed search.
     if val_true or saved_ensemble is not None:
-        ensemble_parameters = generic_best if generic_best is not None else {
-            "a_sum": best_a_sum, "SGFCF": best_sg, "DAN": best_dan,
-        }
-        save_best_parameters(ensemble_key, ensemble_parameters, test_results=test_result)
-    world.cprint("=== Validation / search results ===")
-    if val_true and generic_best is None:
-        world.cprint(f"SGFCF validation: {best_sg_result}")
-        world.cprint(f"DAN validation: {best_dan_result}")
-        world.cprint(f"a_sum={best_a_sum}: {best_result}")
+        save_best_parameters(ensemble_key, generic_best, test_results=test_result)
     world.cprint("=== Final test results ===")
-    if generic_best is None:
-        world.cprint(f"SGFCF parameters: {best_sg}")
-        world.cprint(f"DAN parameters: {best_dan}")
-        world.cprint(f"a_sum (SGFCF coefficient): {best_a_sum}")
-        world.cprint(f"DAN coefficient: {1.0 - float(best_a_sum)}")
-    else:
-        world.cprint(f"Ensemble parameters: {generic_best}")
+    world.cprint(f"Ensemble parameters: {generic_best}")
     world.cprint(f"ensemble test: {test_result}")
     del test_scores
-    if generic_best is None:
-        del sg_test, dan_test
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -802,4 +597,4 @@ try:
 
 finally:
     if world.tensorboard:
-        w.close()
+        tensorWrite.close()

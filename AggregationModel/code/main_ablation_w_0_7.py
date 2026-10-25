@@ -59,16 +59,16 @@ def load_dataset_split(loader_class, dataset_path, eval_file):
 
 # init tensorboard
 if world.tensorboard:
-    w: SummaryWriter = SummaryWriter(
+    tensorWrite: SummaryWriter = SummaryWriter(
         join(world.BOARD_PATH, time.strftime("%m-%d-%Hh%Mm%Ss-") + "-" + world.comment)
     )
 else:
-    w = None
+    tensorWrite = None
     world.cprint("not enable tensorflowboard")
 
 try:
 
-    # # # Important : The model now performs averaging on the stage1 ensemble models. It then looks for the best a_sum only in the second stage.
+    # # # Important : The model now performs averaging on the stage1 ensemble models. It then looks for the best w only in the second stage.
     
     val_true = 1
     #   0: no hyperparameter search; test default params on test.txt
@@ -82,14 +82,14 @@ try:
     if fixed_k not in (0, 1):
         raise ValueError("fixed_k must be 0 or 1.")
     
-    TOP_CANDIDATES = world.ensemble_k
+    TOP_CANDIDATES = world.M
     # Number of per-model candidates retained from the individual validation searches before the ensemble search.
 
-    # a_sum_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
-    a_sum_space = (0.3,) # Removing secondary model
-    # a_sum_space = (1.0,) # Removing primary model
-    # a_sum_space = (0.5,) # Simple Average
-    # Ensemble scores are (1-a_sum) * Model_1 + a_sum * Model_2
+    # w_space = (0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0)
+    w_space = (0.7,) # Removing secondary model
+    # w_space = (1.0,) # Removing primary model
+    # w_space = (0.5,) # Simple Average
+    # Ensemble scores are (1-w) * Model_1 + w * Model_2
 
 
     # ---------------------------------------------------------
@@ -489,13 +489,13 @@ try:
         # Other pairs are handled exclusively by the generic top-10 branch
         # below; running this block for them would evaluate irrelevant
         # placeholder SGFCF/DAN scores and overwrite their ensemble log.
-        best_a_sum, best_result, best_score = None, None, -np.inf
+        best_w, best_result, best_score = None, None, -np.inf
         best_sg, best_dan = None, None
         best_sg_result, best_dan_result = None, None
         if ensemble_models == ["DAN", "SGFCF"]:
             best_sg_result, best_dan_result = top_sg[0][2], top_dan[0][2]
             if saved_ensemble is not None:
-                best_a_sum = float(saved_ensemble["a_sum"])
+                best_w = float(saved_ensemble["w"])
                 best_sg = dict(saved_ensemble["SGFCF"])
                 best_dan = dict(saved_ensemble["DAN"])
                 best_result = None
@@ -506,14 +506,14 @@ try:
                     dan_scores = search_model.S_DAN(**dan_params, cache=cache)
                     for _, sg_params, _ in top_sg:
                         sg_scores = search_model.S_SGFCF(**sg_params, cache=cache)
-                        for a_sum in a_sum_space:
-                            ensemble = (float(a_sum) * sg_scores +
-                                        (1.0 - float(a_sum)) * dan_scores)
+                        for w in w_space:
+                            ensemble = (float(w) * sg_scores +
+                                        (1.0 - float(w)) * dan_scores)
                             result = metric(ensemble, search_model, search_dataset)
                             score = float(result["recall"][0])
                             if score > best_score:
                                 best_score = score
-                                best_a_sum = a_sum
+                                best_w = w
                                 best_result = result
                                 best_sg = dict(sg_params)
                                 best_dan = dict(dan_params)
@@ -522,7 +522,7 @@ try:
                     del dan_scores
                 save_best_parameters(
                     ensemble_key,
-                    {"a_sum": best_a_sum, "SGFCF": best_sg, "DAN": best_dan},
+                    {"w": best_w, "SGFCF": best_sg, "DAN": best_dan},
                 )
         if ensemble_models != ["DAN", "SGFCF"]:
             # For the additional baselines, run the same validation/resume
@@ -600,16 +600,16 @@ try:
                     ]
                     mean_scores[model_name] = sum(candidate_scores) / len(candidate_scores)
                     del candidate_scores
-                for a_sum in a_sum_space:
+                for w in w_space:
                     combined = model.LinearScoreMatrix(
-                        mean_scores[first_model], mean_scores[second_model], a_sum
+                        mean_scores[first_model], mean_scores[second_model], w
                     )
                     result = metric(combined, search_model, search_dataset)
                     score = float(result["recall"][0])
                     if score > best_score_generic:
                         best_score_generic = score
                         generic_best = {
-                            "a_sum": a_sum,
+                            "w": w,
                             first_model: [dict(p) for p in model_candidates[first_model]],
                             second_model: [dict(p) for p in model_candidates[second_model]],
                         }
@@ -628,16 +628,16 @@ try:
             "beta": 0.3, "drop_p": 0.6, "xi": 0.1}
         if ensemble_models != ["DAN", "SGFCF"]:
             generic_best = saved_ensemble or {
-                "a_sum": 0.5,
+                "w": 0.5,
                 **{name: default_model_parameters(name) for name in ensemble_models},
             }
-            best_a_sum = generic_best["a_sum"]
+            best_w = generic_best["w"]
         elif saved_ensemble is not None:
-            best_a_sum = float(saved_ensemble["a_sum"])
+            best_w = float(saved_ensemble["w"])
             best_sg = dict(saved_ensemble["SGFCF"])
             best_dan = dict(saved_ensemble["DAN"])
         else:
-            best_a_sum = 0.5
+            best_w = 0.5
         best_result = None
 
 
@@ -661,31 +661,31 @@ try:
         first_test = sum(first_test_scores) / len(first_test_scores)
         second_test = sum(second_test_scores) / len(second_test_scores)
         del first_test_scores, second_test_scores
-        test_scores = model.LinearScoreMatrix(first_test, second_test, generic_best["a_sum"])
+        test_scores = model.LinearScoreMatrix(first_test, second_test, generic_best["w"])
         del first_test, second_test
     else:
         sg_test = Recmodel.S_SGFCF(**best_sg, cache=cache)
         dan_test = Recmodel.S_DAN(**best_dan, cache=cache)
-        test_scores = float(best_a_sum) * sg_test + (1.0 - float(best_a_sum)) * dan_test
+        test_scores = float(best_w) * sg_test + (1.0 - float(best_w)) * dan_test
     test_result = Recmodel.Test_RatingMatrix(test_scores, dataset)
     # Update both freshly searched and resumed ensembles after testing.
     # Do not mark unvalidated defaults from val_true=0 as a completed search.
     if val_true or saved_ensemble is not None:
         ensemble_parameters = generic_best if generic_best is not None else {
-            "a_sum": best_a_sum, "SGFCF": best_sg, "DAN": best_dan,
+            "w": best_w, "SGFCF": best_sg, "DAN": best_dan,
         }
         save_best_parameters(ensemble_key, ensemble_parameters, test_results=test_result)
     world.cprint("=== Validation / search results ===")
     if val_true and generic_best is None:
         world.cprint(f"SGFCF validation: {best_sg_result}")
         world.cprint(f"DAN validation: {best_dan_result}")
-        world.cprint(f"a_sum={best_a_sum}: {best_result}")
+        world.cprint(f"w={best_w}: {best_result}")
     world.cprint("=== Final test results ===")
     if generic_best is None:
         world.cprint(f"SGFCF parameters: {best_sg}")
         world.cprint(f"DAN parameters: {best_dan}")
-        world.cprint(f"a_sum (SGFCF coefficient): {best_a_sum}")
-        world.cprint(f"DAN coefficient: {1.0 - float(best_a_sum)}")
+        world.cprint(f"w (SGFCF coefficient): {best_w}")
+        world.cprint(f"DAN coefficient: {1.0 - float(best_w)}")
     else:
         world.cprint(f"Ensemble parameters: {generic_best}")
     world.cprint(f"ensemble test: {test_result}")
@@ -701,4 +701,4 @@ try:
 
 finally:
     if world.tensorboard:
-        w.close()
+        tensorWrite.close()

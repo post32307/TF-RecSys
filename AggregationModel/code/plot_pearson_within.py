@@ -56,25 +56,22 @@ def save_heatmap(correlations, labels, output_path, title):
         plt.get_cmap("magma")(np.linspace(0, 1, 128)),
         plt.get_cmap("viridis_r")(np.linspace(0, 1, 128)),
     ]))
-    image = axis.imshow(
+    axis.imshow(
         np.ma.masked_invalid(correlations), cmap=cmap,
         vmin=CORRELATION_MIN, vmax=CORRELATION_MAX,
     )
     axis.set_xticks([])
     axis.set_yticks([])
-    axis.set_title(title, fontsize=16, fontweight="semibold", pad=14)
+    axis.set_title(title, fontsize=32, fontweight="semibold", pad=14)
     positive_scale = plt.cm.ScalarMappable(
         norm=Normalize(vmin=0, vmax=CORRELATION_MAX),
         cmap="viridis_r",
     )
-    figure.colorbar(positive_scale, ax=axis, label="Pearson correlation",
-                    fraction=0.046, pad=0.04)
-    if len(labels) <= 15:
-        for row in range(len(labels)):
-            for column in range(len(labels)):
-                value = correlations[row, column]
-                text = "nan" if not np.isfinite(value) else f"{value:.2f}"
-                axis.text(column, row, text, ha="center", va="center", fontsize=7)
+    colorbar = figure.colorbar(
+        positive_scale, ax=axis, fraction=0.046, pad=0.04,
+    )
+    colorbar.set_label("Pearson correlation", fontsize=24)
+    colorbar.ax.tick_params(labelsize=21.6)
     figure.tight_layout()
     figure.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(figure)
@@ -256,9 +253,14 @@ def print_model_correlations(recmodel, model_name, max_rank, parameter_name,
             {label: config for label, config in zip(labels, configurations)},
             mapping_file, indent=2,
         )
+    dataset_title = "-".join(
+        part[:1].upper() + part[1:] for part in plot_world.dataset.split("-")
+    )
+    if plot_world.dataset.lower() == "lastfm":
+        dataset_title = "LastFM"
     save_heatmap(
         correlations, labels, output_path,
-        f"Within-model average row-wise Pearson: {model_name} ({plot_world.dataset})",
+        f"Within-Model Corr.({model_name} / {dataset_title})",
     )
     print(f"Saved parameter ID mapping: {mapping_path}")
 

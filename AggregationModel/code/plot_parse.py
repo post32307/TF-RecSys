@@ -4,20 +4,18 @@ import argparse
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Compare baseline scoring matrices by user/item groups"
-    )
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "--models", nargs="+", default=["EASE", "SGFCF"],
         choices=["EASE", "SGFCF", "BSPM", "ChebyCF", "DAN",
                  "GF-CF", "PGSP", "TurboCF"],
         help="Baseline models to score and plot (default: EASE SGFCF)",
     )
-    parser.add_argument(
-        "--model", choices=["EASE", "SGFCF", "BSPM", "ChebyCF", "DAN",
-                            "GF-CF", "PGSP", "TurboCF", "FaGSP", "HiGSP"],
-        default="EASE", help="Single model used by plot_pearson_within.py",
-    )
+    # parser.add_argument(
+    #     "--model", choices=["EASE", "SGFCF", "BSPM", "ChebyCF", "DAN",
+    #                         "GF-CF", "PGSP", "TurboCF", "FaGSP", "HiGSP"],
+    #     default="EASE", help="Single model used by plot_pearson_within.py",
+    # )
     parser.add_argument(
         "--parameter",
         help="Model parameter to vary in plot_pearson_within.py",
@@ -36,8 +34,8 @@ def parse_args():
                         help="GPU device index when CUDA is available")
     parser.add_argument("--item_index", type=int, default=0,
                         help="Item group ID to plot (zero-based; default: 0)")
-    parser.add_argument("--n_user_groups", type=int, default=10,
+    parser.add_argument("--n_user_groups", type=int, default=20,
                         help="Number of cosine-similarity user groups")
-    parser.add_argument("--n_item_groups", type=int, default=8,
+    parser.add_argument("--n_item_groups", type=int, default=10,
                         help="Number of cosine-similarity item groups")
     return parser.parse_args()

@@ -496,128 +496,6 @@ class TFmodel:
                 "params": {"reg_p": float(reg_p), "alpha": float(alpha),
                            "beta": float(beta), "drop_p": float(drop_p), "xi": float(xi)}}
 
-
-
-    def build_combined_X(self, beta_1=1.0, beta_2=1.0, gamma=1.0,
-                         dan_coefficient=1.0, dan_params=None,
-                         alpha_i=0.2, lambda_i=1.0,
-                         alpha_u=0.2, lambda_u=1.0, cache=None,
-                         return_components=False):
-        user_degree = np.asarray(self.R.sum(axis=1)).ravel()
-        item_degree = np.asarray(self.R.sum(axis=0)).ravel()
-        with np.errstate(divide="ignore", invalid="ignore"):
-            user_scale = np.power(user_degree + float(lambda_u), -float(alpha_u))
-            item_scale = np.power(item_degree + float(lambda_i), -float(alpha_i))
-        user_scale[~np.isfinite(user_scale)] = 0.0
-        item_scale[~np.isfinite(item_scale)] = 0.0
-        norm_cache = None if cache is None else cache.setdefault("normalized", {})
-        norm_key = (float(alpha_i), float(lambda_i), float(alpha_u), float(lambda_u))
-        if norm_cache is not None and norm_key in norm_cache:
-            normalized_interaction, normalized_adj = norm_cache[norm_key]
-        else:
-            normalized_interaction = sp.diags(user_scale).dot(
-                self.R
-            ).dot(sp.diags(item_scale)).tocsr()
-            normalized_adj = sp.bmat([
-                [None, normalized_interaction],
-                [normalized_interaction.T, None],
-            ], format="csr")
-            if norm_cache is not None:
-                max_entries = cache.get("max_normalized_entries", 1)
-                while len(norm_cache) >= int(max_entries):
-                    norm_cache.pop(next(iter(norm_cache)))
-                norm_cache[norm_key] = (normalized_interaction, normalized_adj)
-        eig_cache = None if cache is None else cache.setdefault("eigen", {})
-        eig_key = (int(self.k), float(alpha_i), float(lambda_i),
-                   float(alpha_u), float(lambda_u))
-        if eig_cache is not None and eig_key in eig_cache:
-            eigenvectors, eigenvalues = eig_cache[eig_key]
-        else:
-            eigenvectors, eigenvalues = self.Eigendecomposition(normalized_adj)
-            if eig_cache is not None:
-                max_entries = cache.get("max_eigen_entries")
-                if max_entries is not None and max_entries > 0:
-                    while len(eig_cache) >= int(max_entries):
-                        eig_cache.pop(next(iter(eig_cache)))
-                eig_cache[eig_key] = (eigenvectors, eigenvalues)
-        user_homophily, item_homophily = self.compute_homophily()
-        homophily = torch.cat((user_homophily.to(self.device),
-                               item_homophily.to(self.device)))
-        response = self.individual_weight(
-            torch.clamp(torch.abs(eigenvalues), min=1e-12),
-            homophily,
-            beta_1=beta_1,
-            beta_2=beta_2,
-        )
-        filtered = eigenvectors * response
-        graph_scores = filtered[:self.n_users] @ filtered[self.n_users:].t()
-        graph_sum = graph_scores.sum(dim=1, keepdim=True)
-        graph_sum[graph_sum == 0] = 1.0
-        graph_scores = graph_scores / graph_sum
-        gamma_value = float(gamma)
-        convolution = None
-        if gamma_value != 0.0:
-            normalized_interactions = normalized_adj[:self.n_users, self.n_users:]
-            convolution = normalized_interactions.dot(
-                normalized_interactions.T
-            ).dot(normalized_interactions).toarray()
-            convolution = torch.as_tensor(convolution, dtype=torch.float32,
-                                           device=self.device)
-            convolution_sum = convolution.sum(dim=1, keepdim=True)
-            convolution_sum[convolution_sum == 0] = 1.0
-            convolution = convolution / convolution_sum
-        dan_options = dict(dan_params or {})
-        dan_alpha = float(dan_options.pop("alpha", 0.0))
-        dan_beta = float(dan_options.pop("beta", 0.0))
-        dan_cache = None if cache is None else cache.setdefault("dan", {})
-        dan_key = (float(alpha_i), float(lambda_i), float(alpha_u),
-                   float(lambda_u), tuple(sorted(dan_options.items())))
-        if dan_cache is not None and dan_key in dan_cache:
-            dan_state = dan_cache[dan_key]
-        else:
-            dan_state = self.fit_dan(
-                interactions=self.R,
-                alpha=dan_alpha,
-                beta=dan_beta,
-                alpha_i=alpha_i,
-                lambda_i=lambda_i,
-                alpha_u=alpha_u,
-                lambda_u=lambda_u,
-                **dan_options,
-            )
-            if dan_cache is not None:
-                max_entries = cache.get("max_dan_entries", 1)
-                while len(dan_cache) >= int(max_entries):
-                    dan_cache.pop(next(iter(dan_cache)))
-                dan_cache[dan_key] = dan_state
-        dan_scores = np.asarray(
-            normalized_interaction.dot(dan_state["weights"]), dtype=np.float32
-        )
-        dan_scores[:, dan_state["cold_items"]] = -np.inf
-        dan_scores = torch.as_tensor(dan_scores, dtype=torch.float32,
-                                     device=self.device)
-        finite_dan = torch.isfinite(dan_scores)
-        dan_for_sum = torch.where(finite_dan, dan_scores, torch.zeros_like(dan_scores))
-        dan_sum = dan_for_sum.sum(dim=1, keepdim=True)
-        dan_sum[dan_sum == 0] = 1.0
-        dan_for_sum = dan_for_sum / dan_sum
-
-        sgfcf_scores = graph_scores if convolution is None else (
-            graph_scores + gamma_value * convolution
-        )
-        if return_components:
-            return {"sgfcf": sgfcf_scores, "dan": dan_for_sum}
-        X = torch.sigmoid(sgfcf_scores + float(dan_coefficient) * dan_for_sum)
-        cold_items = np.asarray(self.R.sum(axis=0)).ravel() == 0
-        X[:, torch.as_tensor(cold_items, device=self.device)] = -(1 << 10)
-        return X
-
-    # Dataset Operation Functions
-
-    def getNormAdj(self,A,D_inv,alpha1=0.2,alpha2=0.4):
-        adj_norm = D_inv.power(alpha1) @ A @ D_inv.power(alpha2)
-        return adj_norm
-
     # Embedding Functions
 
     def Eigendecomposition(self,X):
@@ -631,25 +509,7 @@ class TFmodel:
         U = torch.nn.functional.normalize(U, p=2, dim=0)
         return U,Eigs
     
-    def Eigendecomposition_Asym(self,X):
-        if torch.is_tensor(X):
-            X = X.cpu().numpy()
-        
-        Eigs_R,U_R = eigs(X, k=self.k,which='LR')
-        U_R = np.asarray(U_R.real, dtype=np.float32)
-        Eigs_R = np.asarray(Eigs_R.real, dtype=np.float32)
-        U_R = torch.from_numpy(U_R).to(self.device)
-        Eigs_R = torch.from_numpy(Eigs_R).to(self.device)
-        U_R = torch.nn.functional.normalize(U_R, p=2, dim=0)
 
-        _,U_L = eigs(X.T, k=self.k,which='LR')
-        U_L = np.asarray(U_L.real, dtype=np.float32)
-        U_L = torch.from_numpy(U_L).to(self.device)
-        U_L = torch.nn.functional.normalize(U_L, p=2, dim=0)
-
-        Eigs = Eigs_R
-        
-        return U_L,U_R,Eigs
     
     # Evaluation Functions
 
@@ -839,3 +699,151 @@ class TFmodel:
             if multicore == 1:
                 pool.close()
             return results
+
+
+
+
+
+#####Previous Functions###############################################################################################
+
+    # def build_combined_X(self, beta_1=1.0, beta_2=1.0, gamma=1.0,
+    #                      dan_coefficient=1.0, dan_params=None,
+    #                      alpha_i=0.2, lambda_i=1.0,
+    #                      alpha_u=0.2, lambda_u=1.0, cache=None,
+    #                      return_components=False):
+    #     user_degree = np.asarray(self.R.sum(axis=1)).ravel()
+    #     item_degree = np.asarray(self.R.sum(axis=0)).ravel()
+    #     with np.errstate(divide="ignore", invalid="ignore"):
+    #         user_scale = np.power(user_degree + float(lambda_u), -float(alpha_u))
+    #         item_scale = np.power(item_degree + float(lambda_i), -float(alpha_i))
+    #     user_scale[~np.isfinite(user_scale)] = 0.0
+    #     item_scale[~np.isfinite(item_scale)] = 0.0
+    #     norm_cache = None if cache is None else cache.setdefault("normalized", {})
+    #     norm_key = (float(alpha_i), float(lambda_i), float(alpha_u), float(lambda_u))
+    #     if norm_cache is not None and norm_key in norm_cache:
+    #         normalized_interaction, normalized_adj = norm_cache[norm_key]
+    #     else:
+    #         normalized_interaction = sp.diags(user_scale).dot(
+    #             self.R
+    #         ).dot(sp.diags(item_scale)).tocsr()
+    #         normalized_adj = sp.bmat([
+    #             [None, normalized_interaction],
+    #             [normalized_interaction.T, None],
+    #         ], format="csr")
+    #         if norm_cache is not None:
+    #             max_entries = cache.get("max_normalized_entries", 1)
+    #             while len(norm_cache) >= int(max_entries):
+    #                 norm_cache.pop(next(iter(norm_cache)))
+    #             norm_cache[norm_key] = (normalized_interaction, normalized_adj)
+    #     eig_cache = None if cache is None else cache.setdefault("eigen", {})
+    #     eig_key = (int(self.k), float(alpha_i), float(lambda_i),
+    #                float(alpha_u), float(lambda_u))
+    #     if eig_cache is not None and eig_key in eig_cache:
+    #         eigenvectors, eigenvalues = eig_cache[eig_key]
+    #     else:
+    #         eigenvectors, eigenvalues = self.Eigendecomposition(normalized_adj)
+    #         if eig_cache is not None:
+    #             max_entries = cache.get("max_eigen_entries")
+    #             if max_entries is not None and max_entries > 0:
+    #                 while len(eig_cache) >= int(max_entries):
+    #                     eig_cache.pop(next(iter(eig_cache)))
+    #             eig_cache[eig_key] = (eigenvectors, eigenvalues)
+    #     user_homophily, item_homophily = self.compute_homophily()
+    #     homophily = torch.cat((user_homophily.to(self.device),
+    #                            item_homophily.to(self.device)))
+    #     response = self.individual_weight(
+    #         torch.clamp(torch.abs(eigenvalues), min=1e-12),
+    #         homophily,
+    #         beta_1=beta_1,
+    #         beta_2=beta_2,
+    #     )
+    #     filtered = eigenvectors * response
+    #     graph_scores = filtered[:self.n_users] @ filtered[self.n_users:].t()
+    #     graph_sum = graph_scores.sum(dim=1, keepdim=True)
+    #     graph_sum[graph_sum == 0] = 1.0
+    #     graph_scores = graph_scores / graph_sum
+    #     gamma_value = float(gamma)
+    #     convolution = None
+    #     if gamma_value != 0.0:
+    #         normalized_interactions = normalized_adj[:self.n_users, self.n_users:]
+    #         convolution = normalized_interactions.dot(
+    #             normalized_interactions.T
+    #         ).dot(normalized_interactions).toarray()
+    #         convolution = torch.as_tensor(convolution, dtype=torch.float32,
+    #                                        device=self.device)
+    #         convolution_sum = convolution.sum(dim=1, keepdim=True)
+    #         convolution_sum[convolution_sum == 0] = 1.0
+    #         convolution = convolution / convolution_sum
+    #     dan_options = dict(dan_params or {})
+    #     dan_alpha = float(dan_options.pop("alpha", 0.0))
+    #     dan_beta = float(dan_options.pop("beta", 0.0))
+    #     dan_cache = None if cache is None else cache.setdefault("dan", {})
+    #     dan_key = (float(alpha_i), float(lambda_i), float(alpha_u),
+    #                float(lambda_u), tuple(sorted(dan_options.items())))
+    #     if dan_cache is not None and dan_key in dan_cache:
+    #         dan_state = dan_cache[dan_key]
+    #     else:
+    #         dan_state = self.fit_dan(
+    #             interactions=self.R,
+    #             alpha=dan_alpha,
+    #             beta=dan_beta,
+    #             alpha_i=alpha_i,
+    #             lambda_i=lambda_i,
+    #             alpha_u=alpha_u,
+    #             lambda_u=lambda_u,
+    #             **dan_options,
+    #         )
+    #         if dan_cache is not None:
+    #             max_entries = cache.get("max_dan_entries", 1)
+    #             while len(dan_cache) >= int(max_entries):
+    #                 dan_cache.pop(next(iter(dan_cache)))
+    #             dan_cache[dan_key] = dan_state
+    #     dan_scores = np.asarray(
+    #         normalized_interaction.dot(dan_state["weights"]), dtype=np.float32
+    #     )
+    #     dan_scores[:, dan_state["cold_items"]] = -np.inf
+    #     dan_scores = torch.as_tensor(dan_scores, dtype=torch.float32,
+    #                                  device=self.device)
+    #     finite_dan = torch.isfinite(dan_scores)
+    #     dan_for_sum = torch.where(finite_dan, dan_scores, torch.zeros_like(dan_scores))
+    #     dan_sum = dan_for_sum.sum(dim=1, keepdim=True)
+    #     dan_sum[dan_sum == 0] = 1.0
+    #     dan_for_sum = dan_for_sum / dan_sum
+
+    #     sgfcf_scores = graph_scores if convolution is None else (
+    #         graph_scores + gamma_value * convolution
+    #     )
+    #     if return_components:
+    #         return {"sgfcf": sgfcf_scores, "dan": dan_for_sum}
+    #     X = torch.sigmoid(sgfcf_scores + float(dan_coefficient) * dan_for_sum)
+    #     cold_items = np.asarray(self.R.sum(axis=0)).ravel() == 0
+    #     X[:, torch.as_tensor(cold_items, device=self.device)] = -(1 << 10)
+    #     return X
+
+    # Dataset Operation Functions
+
+    # def getNormAdj(self,A,D_inv,alpha1=0.2,alpha2=0.4):
+    #     adj_norm = D_inv.power(alpha1) @ A @ D_inv.power(alpha2)
+    #     return adj_norm
+
+
+
+    # def Eigendecomposition_Asym(self,X):
+    #     if torch.is_tensor(X):
+    #         X = X.cpu().numpy()
+        
+    #     Eigs_R,U_R = eigs(X, k=self.k,which='LR')
+    #     U_R = np.asarray(U_R.real, dtype=np.float32)
+    #     Eigs_R = np.asarray(Eigs_R.real, dtype=np.float32)
+    #     U_R = torch.from_numpy(U_R).to(self.device)
+    #     Eigs_R = torch.from_numpy(Eigs_R).to(self.device)
+    #     U_R = torch.nn.functional.normalize(U_R, p=2, dim=0)
+
+    #     _,U_L = eigs(X.T, k=self.k,which='LR')
+    #     U_L = np.asarray(U_L.real, dtype=np.float32)
+    #     U_L = torch.from_numpy(U_L).to(self.device)
+    #     U_L = torch.nn.functional.normalize(U_L, p=2, dim=0)
+
+    #     Eigs = Eigs_R
+        
+    #     return U_L,U_R,Eigs

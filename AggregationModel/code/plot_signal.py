@@ -184,13 +184,15 @@ def plot_degree_score(model_scores, interaction_matrix,
                 linestyle="-", label=model_name,
             )
         ax.set_xticks(x_positions, ordered_group_ids)
-        ax.tick_params(axis="x", labelsize=6)
-        ax.set_title(f"Item Group {group_id}")
-        ax.set_xlabel("User Group ID (Ordered by combined model score)")
-        ax.set_ylabel("Average Row-normalized Score")
+        ax.tick_params(axis="both", labelsize=12)
+        ax.set_title(f"Item Group {group_id}", fontsize=18)
+        ax.set_xlabel(
+            "User Group ID (Ordered by combined model score)", fontsize=14
+        )
+        ax.set_ylabel("Average Row-normalized Score", fontsize=14)
         ax.legend(
             loc="center left", bbox_to_anchor=(1.02, 0.5),
-            fontsize="small", frameon=False, borderaxespad=0,
+            fontsize=14, frameon=False, borderaxespad=0,
         )
 
     def save_figure(figure, user_group_count, group_id, item_group_count):

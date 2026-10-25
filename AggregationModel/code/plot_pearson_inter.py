@@ -25,25 +25,23 @@ def save_heatmap(correlations, labels, output_path, title):
         plt.get_cmap("magma")(np.linspace(0, 1, 128)),
         plt.get_cmap("viridis_r")(np.linspace(0, 1, 128)),
     ]))
-    image = axis.imshow(
+    axis.imshow(
         np.ma.masked_invalid(correlations), cmap=cmap,
         vmin=CORRELATION_MIN, vmax=CORRELATION_MAX,
     )
     axis.set_xticks(np.arange(len(labels)), labels, rotation=45, ha="right")
     axis.set_yticks(np.arange(len(labels)), labels)
-    axis.set_title(title, fontsize=16, fontweight="semibold", pad=14)
+    axis.tick_params(axis="both", labelsize=27)
+    axis.set_title(title, fontsize=32, fontweight="semibold", pad=14)
     positive_scale = plt.cm.ScalarMappable(
         norm=Normalize(vmin=0, vmax=CORRELATION_MAX),
         cmap="viridis_r",
     )
-    figure.colorbar(positive_scale, ax=axis, label="Pearson correlation",
-                    fraction=0.046, pad=0.04)
-    if len(labels) <= 15:
-        for row in range(len(labels)):
-            for column in range(len(labels)):
-                value = correlations[row, column]
-                text = "nan" if not np.isfinite(value) else f"{value:.2f}"
-                axis.text(column, row, text, ha="center", va="center", fontsize=8)
+    colorbar = figure.colorbar(
+        positive_scale, ax=axis, fraction=0.046, pad=0.04,
+    )
+    colorbar.set_label("Pearson correlation", fontsize=24)
+    colorbar.ax.tick_params(labelsize=21.6)
     figure.tight_layout()
     figure.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(figure)
@@ -186,9 +184,14 @@ def main():
         output_dir,
         f"{plot_world.dataset}_seed_{plot_world.seed}_{model_tag}.png",
     )
+    dataset_title = "-".join(
+        part[:1].upper() + part[1:] for part in plot_world.dataset.split("-")
+    )
+    if plot_world.dataset.lower() == "lastfm":
+        dataset_title = "LastFM"
     save_heatmap(
         correlations, model_names, output_path,
-        f"Inter-model average row-wise Pearson: {plot_world.dataset}",
+        f"Inter-Model Corr.({dataset_title})",
     )
 
 

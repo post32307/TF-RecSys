@@ -22,7 +22,7 @@ if not os.path.exists(FILE_PATH):
 
 
 config = {}
-all_dataset = ['lastfm', 'gowalla', 'yelp2018', 'amazon-book', 'dummy_small', 'dummy_large', 'amazon-CD','amazon-electronics','citeulike','movielens', 'news', 'douban-book','epinions','yelp']
+all_dataset = ['lastfm', 'gowalla', 'yelp2018', 'amazon-CD','amazon-electronics','citeulike','movielens', 'news', 'douban-book','epinions']
 all_models  = ['pse-model']
 config['k'] = args.k
 config['test_u_batch_size'] = 100#128
@@ -33,14 +33,14 @@ CORES = multiprocessing.cpu_count() // 2
 seed = args.seed
 
 dataset = args.dataset
-model_name = args.model
+# model_name = args.model
 ensemble_models = args.ensemble_models
-ensemble_k = args.ensemble_k
+M = args.M
 params_filename = args.params_filename
 if dataset not in all_dataset:
     raise NotImplementedError(f"Haven't supported {dataset} yet!, try {all_dataset}")
-if model_name not in all_models:
-    raise NotImplementedError(f"Haven't supported {model_name} yet!, try {all_models}")
+# if model_name not in all_models:
+#     raise NotImplementedError(f"Haven't supported {model_name} yet!, try {all_models}")
 
 LOAD = args.load
 topks = eval(args.topks)
@@ -54,23 +54,6 @@ simplefilter(action="ignore", category=FutureWarning)
 
 def cprint(words : str):
     print(f"\033[0;30;43m{words}\033[0m")
-
-logo = r"""
-██╗      ██████╗ ███╗   ██╗
-██║     ██╔════╝ ████╗  ██║
-██║     ██║  ███╗██╔██╗ ██║
-██║     ██║   ██║██║╚██╗██║
-███████╗╚██████╔╝██║ ╚████║
-╚══════╝ ╚═════╝ ╚═╝  ╚═══╝
-"""
-PSE = r"""
-██████╗ ███████╗███████╗
-██╔══██╗██╔════╝██╔════╝
-██████╔╝███████╗█████╗  
-██╔═══╝ ╚════██║██╔══╝  
-██║     ███████║███████╗
-╚═╝     ╚══════╝╚══════╝
-"""
 TF = r"""
 ████████╗██████╗  █████╗ ██╗███╗   ██╗██╗███╗   ██╗ ██████╗        ███████╗██████╗ ███████╗███████╗
 ╚══██╔══╝██╔══██╗██╔══██╗██║████╗  ██║██║████╗  ██║██╔════╝        ██╔════╝██╔══██╗██╔════╝██╔════╝
